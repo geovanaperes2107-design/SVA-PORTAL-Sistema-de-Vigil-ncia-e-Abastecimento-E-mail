@@ -18,11 +18,14 @@ interface TrackingProps {
 interface EBProps { children: ReactNode; }
 interface EBState { hasError: boolean; error: any; }
 
-class ErrorBoundary extends React.Component<any, any> {
-  state = { hasError: false };
+class ErrorBoundary extends Component<EBProps, EBState> {
+  constructor(props: EBProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: any): EBState {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error: any, errorInfo: any) {
@@ -49,7 +52,7 @@ class ErrorBoundary extends React.Component<any, any> {
         </div>
       );
     }
-    return (this.props as any).children;
+    return this.props.children;
   }
 }
 
@@ -205,34 +208,49 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
   const simulateExtract = (groupKey: string, fileName: string) => {
     setIsExtracting(groupKey);
-    setTimeout(() => {
-      const csvLog = [
-        "Cód. Ordem de Compra,Fornecedor,Prazo Entrega,Item,Qtd,Valor Unit,Total,Confirmado em",
-        `23452,ATIVA COMERCIAL HOSPITALAR LTDA,5 dias úteis,AMBROXOL,2,2.12,4.24,16/02/2026`
-      ].join("\n");
-      console.log(`EXTRACTION LOG FOR ${fileName}:\n`, csvLog);
+    setTimeout(async () => {
+      // Dados simulados da extração
+      const identifiedSupplier = "ATIVA COMERCIAL HOSPITALAR LTDA";
+      const identifiedOC = "23452";
+      const identifiedDelivery = "5 dias úteis";
 
+      // 1. Atualizar o Banco de Dados (Supabase) para que a extração persista
+      // Buscamos todas as ordens desse grupo (mesmo Quotation-Solicitation)
+      const groupOrders = orders.filter(o => `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}` === groupKey);
+
+      for (const orderToUpdate of groupOrders) {
+        await supabase.from('purchase_orders').update({
+          supplier_name: identifiedSupplier,
+          order_number: identifiedOC,
+          expected_delivery_date: identifiedDelivery
+        }).eq('id', orderToUpdate.id);
+
+        // Opcional: Marcar itens como confirmados/lidos se houver lógica para isso
+      }
+
+      // 2. Atualizar o estado local para feedback imediato na UI
       setOrders((prev: PurchaseOrder[]) => (prev || []).map(o => {
         const key = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
         if (key === groupKey) {
-          const items = (o.items || []).map((it, idx) => ({
+          const items = (o.items || []).map(it => ({
             ...it,
             orderQuantity: it.orderQuantity || 1,
-            confirmedAt: "16/02/2026"
+            confirmedAt: new Date().toLocaleDateString('pt-BR')
           }));
           return {
             ...o,
-            supplierName: "ATIVA COMERCIAL HOSPITALAR LTDA",
-            orderNumber: "23452",
-            expectedDeliveryDate: "5 dias úteis",
+            supplierName: identifiedSupplier,
+            orderNumber: identifiedOC,
+            expectedDeliveryDate: identifiedDelivery,
             items
           };
         }
         return o;
       }));
+
       setIsExtracting(null);
-      alert(`Antigravity IA: Extração de "${fileName}" concluída com sucesso!`);
-    }, 1500);
+      alert(`SVA IA: Extração de "${fileName}" concluída e salva no banco!`);
+    }, 2000);
   };
 
   if (!selectedClass) {
@@ -451,22 +469,31 @@ const DeliveryManagementView: React.FC<{ orders: PurchaseOrder[], setOrders: any
             key={o?.id || Math.random().toString()}
             order={o}
             onSave={async (items: any[]) => {
-              // Registrar Recebimento no Supabase
+              // Calcular se é entrega total ou parcial
+              const isPartial = items.some(it => (it.quantityReceived || 0) < (it.orderQuantity || 0));
+              const isEverythingZero = items.every(it => (it.quantityReceived || 0) === 0);
+
+              if (isEverythingZero) {
+                alert("Nenhuma quantidade informada para recebimento.");
+                return;
+              }
+
+              const targetStatus = isPartial ? OrderStatus.EntregaParcial : OrderStatus.EntregaTotal;
+
               const { error: orderError } = await supabase.from('purchase_orders').update({
-                status: OrderStatus.EntregaTotal,
-                date_closed: new Date().toISOString()
+                status: targetStatus,
+                date_closed: targetStatus === OrderStatus.EntregaTotal ? new Date().toISOString() : null
               }).eq('id', o?.id);
 
               if (!orderError) {
-                // Atualizar intens individualmente
                 for (const item of items) {
                   await supabase.from('order_items').update({
-                    quantity_received: item.quantityReceived,
-                    total_value_received: item.totalValueReceived,
-                    received_date: new Date().toISOString()
+                    quantity_received: item.quantityReceived || 0,
+                    total_value_received: (item.quantityReceived || 0) * (item.product?.unitPrice || 0),
+                    received_date: item.quantityReceived > 0 ? new Date().toISOString() : null
                   }).eq('order_id', o?.id).eq('product_id', item.productId);
                 }
-                alert("Registro de recebimento salvo no SVA PORTAL!");
+                alert(`Recebimento ${isPartial ? 'PARCIAL' : 'TOTAL'} registrado com sucesso!`);
               } else {
                 alert("Erro ao salvar recebimento: " + orderError.message);
               }
