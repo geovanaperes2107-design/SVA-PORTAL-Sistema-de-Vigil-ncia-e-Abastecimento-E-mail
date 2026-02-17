@@ -1,0 +1,4 @@
+﻿pages/TrackingManagement.tsx(18,10): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.
+pages/TrackingManagement.tsx(30,14): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.
+pages/TrackingManagement.tsx(41,33): error TS2339: Property 'setState' does not exist on type 'ErrorBoundary'.
+pages/TrackingManagement.tsx(49,17): error TS2339: Property 'props' does not exist on type 'ErrorBoundary'.

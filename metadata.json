@@ -1,0 +1,7 @@
+{
+  "name": "Hospital Supply Portal",
+  "description": "A comprehensive hospital procurement and supply chain management system featuring intelligent purchase suggestions, order tracking, and delivery management.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
