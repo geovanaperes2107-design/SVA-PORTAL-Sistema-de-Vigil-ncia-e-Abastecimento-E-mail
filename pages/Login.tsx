@@ -30,8 +30,13 @@ const LoginPage: React.FC = () => {
           .eq('cpf', cpfOnlyNumbers)
           .single();
 
-        if (profileError || !profileData?.email) {
-          throw new Error("CPF não encontrado ou sem e-mail vinculado.");
+        if (profileError) {
+          console.error("Erro ao buscar perfil por CPF:", profileError);
+          throw new Error(`Erro ao localizar CPF: ${profileError.message}`);
+        }
+
+        if (!profileData?.email) {
+          throw new Error("CPF encontrado, mas não possui e-mail associado.");
         }
         loginEmail = profileData.email;
       }
