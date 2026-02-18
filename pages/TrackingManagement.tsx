@@ -223,7 +223,6 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     setIsExtracting(groupKey);
     setTimeout(async () => {
       // 1. Lógica de "IA" para identificar dados baseados no nome do arquivo ou contexto
-      // Tentamos extrair um número do arquivo (ex: "6697 Relatorio...")
       const fileNumberMatch = fileName.match(/\d+/);
       const identifiedOC = fileNumberMatch ? fileNumberMatch[0] : "23452";
 
@@ -232,12 +231,15 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       const identifiedQuotation = groupKey !== 'global' ? groupKey.split('-')[0] : (fileNumberMatch ? fileNumberMatch[0] : "6697");
 
       // 2. Localizar as ordens que serão atualizadas
-      // Se for global, tentamos dar "match" pelo número identificado no arquivo (Cotação N°)
+      // Normalizamos na comparação para ignorar "COT-" ou espaços
       const groupOrders = orders.filter(o => {
-        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
+        const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
+        const idQNum = String(identifiedQuotation).replace(/\D/g, '');
+
         if (groupKey === 'global') {
-          return String(o?.quotationNumber).includes(identifiedQuotation);
+          return qNum.includes(idQNum) || idQNum.includes(qNum);
         }
+        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
         return oKey === groupKey;
       });
 
@@ -247,21 +249,25 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         return;
       }
 
-      // 3. Persistir no Supabase
+      // 3. Persistir no Supabase e FORÇAR STATUS PARA TRIAGEM
       for (const orderToUpdate of groupOrders) {
         await supabase.from('purchase_orders').update({
           supplier_name: identifiedSupplier,
           order_number: identifiedOC,
           expected_delivery_date: identifiedDelivery,
-          quotation_number: identifiedQuotation
+          quotation_number: identifiedQuotation,
+          status: OrderStatus.Triagem // Forçamos o status para que "caia" na triagem
         }).eq('id', orderToUpdate.id);
       }
 
-      // 4. Atualizar o estado local com os itens detalhados (Código, Descrição, Qtd, Valor)
+      // 4. Atualizar o estado local
       setOrders((prev: PurchaseOrder[]) => (prev || []).map(o => {
+        const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
+        const idQNum = String(identifiedQuotation).replace(/\D/g, '');
         const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
+
         const isMatch = groupKey === 'global'
-          ? String(o?.quotationNumber).includes(identifiedQuotation)
+          ? (qNum.includes(idQNum) || idQNum.includes(qNum))
           : oKey === groupKey;
 
         if (isMatch) {
@@ -277,6 +283,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
           return {
             ...o,
+            status: OrderStatus.Triagem, // Força no estado local também
             supplierName: identifiedSupplier,
             orderNumber: identifiedOC,
             expectedDeliveryDate: identifiedDelivery,
@@ -288,7 +295,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       }));
 
       setIsExtracting(null);
-      alert(`SVA IA: Extração concluída!\n\nDocumento: ${fileName}\nCotação Identificada: ${identifiedQuotation}\nFornecedor: ${identifiedSupplier}\nOC: ${identifiedOC}\n\nTodos os itens (Código, Descrição, Qtd, Valores) foram mapeados e salvos.`);
+      alert(`SVA IA: Extração concluída!\n\nDocumento: ${fileName}\nCotação Identificada: ${identifiedQuotation}\nFornecedor: ${identifiedSupplier}\nOC: ${identifiedOC}\n\nO pedido foi movido para TRIAGEM e todos os itens foram mapeados.`);
     }, 2000);
   };
 
