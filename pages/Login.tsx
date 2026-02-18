@@ -26,7 +26,7 @@ const LoginPage: React.FC = () => {
         // Busca o perfil pelo CPF para encontrar o e-mail associado
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
-          .select('email') // Assumindo que a coluna email existe ou será adicionada
+          .select('email')
           .eq('cpf', cpfOnlyNumbers)
           .single();
 
@@ -188,11 +188,6 @@ const LoginPage: React.FC = () => {
             )}
           </button>
         </form>
-
-        <div className="px-14 pb-10 text-[10px] text-slate-400 font-black uppercase tracking-widest opacity-30 hover:opacity-100 transition-opacity text-center">
-          Configuração: {(window as any).supabase_connected ? '✅ Ativa' : '❌ Pendente'} |
-          URL: {(window as any).supabase_url_preview}...
-        </div>
       </div>
     </div>
   );
