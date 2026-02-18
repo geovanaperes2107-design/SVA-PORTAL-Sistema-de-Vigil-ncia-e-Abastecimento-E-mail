@@ -219,32 +219,30 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     return Array.from(map.entries());
   }, [triagemOrders, selectedClass]);
 
-  const simulateExtract = (groupKey: string, fileName: string) => {
+  const realExtract = async (groupKey: string, file: File) => {
     setIsExtracting(groupKey);
-    setTimeout(async () => {
-      // 1. IA Logic: Identify the Quotation Number
-      const fileNumberMatch = fileName.match(/\d+/);
-      const identifiedQuotation = groupKey !== 'global' ? groupKey.split('-')[0] : (fileNumberMatch ? fileNumberMatch[0] : "6697");
+    try {
+      // 1. Convert File to Base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      const fileBase64 = await base64Promise;
 
-      // 2. Mock Data for "Real" Hospital Items
-      const hospitalProducts = [
-        { name: "Seringa 10ml com Agulha", unit: "un", code: "MAT-102", price: 0.45 },
-        { name: "Soro Fisiológico 0,9% 500ml", unit: "fr", code: "MED-054", price: 4.20 },
-        { name: "Luva de Procedimento Tamanho M", unit: "cx", code: "EPI-009", price: 35.00 },
-        { name: "Dipirona Monoidratada 500mg/ml", unit: "amp", code: "MED-012", price: 1.25 },
-        { name: "Gaze Estéril 7,5 x 7,5", unit: "pac", code: "MAT-301", price: 0.85 },
-        { name: "Cateter Intravenoso nº 20", unit: "un", code: "MAT-215", price: 2.10 },
-        { name: "Máscara Descartável Tripla", unit: "cx", code: "EPI-044", price: 12.50 },
-        { name: "Esparadrapo Impermeável 10cm", unit: "rl", code: "MAT-444", price: 8.90 }
-      ];
+      // 2. Call Supabase Edge Function
+      const { data, error } = await supabase.functions.invoke('parse-report', {
+        body: { fileBase64, fileName: file.name }
+      });
 
-      const suppliers = [
-        "ATIVA COMERCIAL HOSPITALAR LTDA",
-        "DISTRIBUIDORA BRASIL MEDICAMENTOS",
-        "PONTUAL COMERCIAL EIRELI",
-        "INOVAR MED DISTRIBUIDORA",
-        "SAÚDE & VIDA HOSPITALAR"
-      ];
+      if (error) throw error;
+      if (!data || data.error) throw new Error(data?.error || "Falha na extração");
+
+      const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
 
       // 3. Localize or Update Orders
       const groupOrders = orders.filter(o => {
@@ -258,60 +256,57 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         return oKey === groupKey;
       });
 
-      if (groupOrders.length === 0 && groupKey === 'global') {
-        setIsExtracting(null);
-        alert(`SVA IA: Não localizamos a Cotação #${identifiedQuotation} no sistema para o arquivo "${fileName}".`);
-        return;
-      }
+      // 4. Update and Persist each Order based on AI data
+      const updatedOrders: PurchaseOrder[] = [];
 
-      // 4. Update and Persist each Order in the Group
-      const updatedOrders = groupOrders.map((o, idx) => {
-        const supplier = suppliers[idx % suppliers.length];
-        const itemCount = Math.floor(Math.random() * 5) + 3; // 3 to 8 items
+      for (const supplierData of (data.suppliers || [])) {
+        // Find existing order for this supplier or use the first available in group
+        let targetOrder = groupOrders.find(o =>
+          o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
+          supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')
+        ) || groupOrders[0];
 
-        const items = Array.from({ length: itemCount }).map((_, i) => {
-          const prod = hospitalProducts[(idx + i) % hospitalProducts.length];
-          const qty = Math.floor(Math.random() * 100) + 10;
-          return {
-            id: `ext-${o.id}-${i}`,
-            order_id: o.id,
-            product_id: `prod-${i}`,
-            orderQuantity: qty,
-            totalValueOC: qty * prod.price,
-            confirmedAt: new Date().toLocaleDateString('pt-BR'),
-            product: {
-              name: prod.name,
-              unit: prod.unit,
-              codeMVSES: prod.code,
-              unitPrice: prod.price
-            }
-          };
-        });
+        if (!targetOrder) continue;
 
-        const totalValue = items.reduce((sum, it) => sum + (it.orderQuantity * it.product.unitPrice), 0);
+        const items = (supplierData.items || []).map((it: any, i: number) => ({
+          id: `ext-${targetOrder.id}-${i}`,
+          order_id: targetOrder.id,
+          product_id: `prod-${it.code || i}`,
+          orderQuantity: it.quantity || 0,
+          totalValueOC: (it.quantity || 0) * (it.unitPrice || 0),
+          confirmedAt: new Date().toLocaleDateString('pt-BR'),
+          product: {
+            name: it.description || it.name,
+            unit: it.unit || 'un',
+            codeMVSES: it.code || '---',
+            unitPrice: it.unitPrice || 0
+          }
+        }));
 
-        return {
-          ...o,
+        const totalValue = items.reduce((sum: number, it: any) => sum + it.totalValueOC, 0);
+
+        const updated = {
+          ...targetOrder,
           status: OrderStatus.Triagem,
-          supplierName: supplier,
-          orderNumber: `OC-${20000 + Math.floor(Math.random() * 5000)}`,
-          expectedDeliveryDate: "5 dias úteis",
+          supplierName: supplierData.name,
+          orderNumber: supplierData.orderNumber || targetOrder.orderNumber,
+          expectedDeliveryDate: supplierData.deliveryDeadline || "Verificar no PDF",
           quotationNumber: identifiedQuotation,
           items: items as any,
           totalValue: totalValue
         };
-      });
 
-      // DB Updates
-      for (const order of updatedOrders) {
+        updatedOrders.push(updated);
+
+        // Persist
         await supabase.from('purchase_orders').update({
-          supplier_name: order.supplierName,
-          order_number: order.orderNumber,
-          expected_delivery_date: order.expectedDeliveryDate,
-          quotation_number: order.quotationNumber,
-          total_value: order.totalValue,
+          supplier_name: updated.supplierName,
+          order_number: updated.orderNumber,
+          expected_delivery_date: updated.expectedDeliveryDate,
+          quotation_number: updated.quotationNumber,
+          total_value: updated.totalValue,
           status: OrderStatus.Triagem
-        }).eq('id', order.id);
+        }).eq('id', updated.id);
       }
 
       // UI Update
@@ -320,9 +315,13 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         return [...otherOrders, ...updatedOrders];
       });
 
+      alert(`SVA IA: Extração Real Concluída!\n\nDocumento: ${file.name}\nCotação: #${identifiedQuotation}\n\nIdentificamos ${updatedOrders.length} fornecedores com dados reais.`);
+    } catch (err: any) {
+      console.error("Erro na extração:", err);
+      alert("Erro na Extração Real: " + (err.message || "Verifique o console para detalhes"));
+    } finally {
       setIsExtracting(null);
-      alert(`SVA IA: Extração Completa Concluída!\n\nDocumento: ${fileName}\nCotação: #${identifiedQuotation}\n\nIdentificamos ${updatedOrders.length} fornecedores neste relatório.\nTodos os itens, quantidades e valores reais foram mapeados e organizados para triagem.`);
-    }, 2000);
+    }
   };
 
   return (
@@ -358,7 +357,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             {isExtracting ? 'Processando...' : 'Extração Inteligente SVA IA'}
             <input type="file" className="hidden" accept=".pdf" onChange={e => {
               const file = e.target.files?.[0];
-              if (file) simulateExtract('global', file.name);
+              if (file) realExtract('global', file);
             }} disabled={!!isExtracting} />
           </label>
         </div>
@@ -398,7 +397,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               </div>
 
               <div className="grid gap-12">
-                <FolderUploadCard groupKey={key} onExtract={(file) => simulateExtract(key, file.name)} isExtracting={isExtracting === key} />
+                <FolderUploadCard groupKey={key} onExtract={(file) => realExtract(key, file)} isExtracting={isExtracting === key} />
                 {(groupOrders || []).map((o, idx) => (
                   <SupplierTriageCard
                     key={o?.id || `card-${idx}`}
