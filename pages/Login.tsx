@@ -8,10 +8,58 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Função para aplicar máscara de CPF em tempo real
+  const maskCPF = (value: string) => {
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1');
+  };
+
+  // Função auxiliar para busca resiliente (trata AbortError e flickers de rede)
+  const findEmailByCPF = async (cpf: string, retries = 2): Promise<string> => {
+    try {
+      const { data: profileData, error: profileError, status } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('cpf', cpf.replace(/\D/g, ''))
+        .single();
+
+      if (profileError) {
+        if (retries > 0 && (profileError.message?.includes('abort') || status === 0)) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return findEmailByCPF(cpf, retries - 1);
+        }
+        throw profileError;
+      }
+
+      if (!profileData?.email) {
+        throw new Error("CPF encontrado, mas não possui e-mail associado.");
+      }
+      return profileData.email;
+    } catch (err: any) {
+      if (retries > 0 && (err.name === 'AbortError' || err.message?.includes('abort'))) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return findEmailByCPF(cpf, retries - 1);
+      }
+      throw err;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return; // Evita cliques duplos
+
     setError(null);
     setLoading(true);
+
+    // Timeout de segurança: se o login demorar mais de 10s, cancela o estado de loading
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+      setError("A conexão está demorando mais que o esperado. Por favor, tente novamente.");
+    }, 10000);
 
     const cleanIdentifier = credentials.identifier.trim();
     const cleanPassword = credentials.password.trim();
@@ -22,23 +70,12 @@ const LoginPage: React.FC = () => {
       // Se não for e-mail (não tem @), tenta tratar como CPF
       if (!cleanIdentifier.includes('@')) {
         const cpfOnlyNumbers = cleanIdentifier.replace(/\D/g, '');
-
-        // Busca o perfil pelo CPF para encontrar o e-mail associado
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('cpf', cpfOnlyNumbers)
-          .single();
-
-        if (profileError) {
+        try {
+          loginEmail = await findEmailByCPF(cpfOnlyNumbers);
+        } catch (profileError: any) {
           console.error("Erro ao buscar perfil por CPF:", profileError);
-          throw new Error(`Erro ao localizar CPF: ${profileError.message}`);
+          throw new Error(`Erro ao localizar CPF: ${profileError.message || 'Erro de conexão'}`);
         }
-
-        if (!profileData?.email) {
-          throw new Error("CPF encontrado, mas não possui e-mail associado.");
-        }
-        loginEmail = profileData.email;
       }
 
       if (isFirstAccess) {
@@ -68,20 +105,35 @@ const LoginPage: React.FC = () => {
 
         if (loginError) throw loginError;
 
-        // Check if it's first access from profile
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('is_first_access')
-          .eq('id', data.user.id)
-          .single();
+        // Check if it's first access from profile - Resilient fetching
+        const fetchFirstAccessStatus = async (userId: string, retries = 2): Promise<boolean> => {
+          const { data: profile, error: pErr, status } = await supabase
+            .from('profiles')
+            .select('is_first_access')
+            .eq('id', userId)
+            .single();
 
-        if (profile?.is_first_access || cleanPassword === '8754') {
+          if (pErr) {
+            if (retries > 0 && (pErr.message?.includes('abort') || status === 0)) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              return fetchFirstAccessStatus(userId, retries - 1);
+            }
+            console.error("Erro ao verificar primeiro acesso:", pErr);
+            return false;
+          }
+          return !!profile?.is_first_access;
+        };
+
+        const isFirst = await fetchFirstAccessStatus(data.user.id);
+        if (isFirst || cleanPassword === '8754') {
           setIsFirstAccess(true);
         }
       }
     } catch (err: any) {
+      console.error("Erro na autenticação:", err);
       setError(err.message || "Ocorreu um erro na autenticação.");
     } finally {
+      clearTimeout(safetyTimeout);
       setLoading(false);
     }
   };
@@ -123,7 +175,15 @@ const LoginPage: React.FC = () => {
                     className="w-full bg-[#f4f7f6] dark:bg-[#051414] border-none rounded-3xl pl-16 pr-8 py-6 text-base font-bold text-slate-700 dark:text-emerald-50 placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:ring-4 focus:ring-success/20 outline-none transition-all disabled:opacity-50"
                     placeholder="ex@email.com ou 000.000.000-00"
                     value={credentials.identifier}
-                    onChange={e => setCredentials({ ...credentials, identifier: e.target.value })}
+                    onChange={e => {
+                      const val = e.target.value;
+                      // Se o valor parece ser o início de um CPF (apenas números), aplica a máscara
+                      if (/^\d/.test(val.replace(/\D/g, '')) && !val.includes('@')) {
+                        setCredentials({ ...credentials, identifier: maskCPF(val) });
+                      } else {
+                        setCredentials({ ...credentials, identifier: val });
+                      }
+                    }}
                   />
                 </div>
               </div>

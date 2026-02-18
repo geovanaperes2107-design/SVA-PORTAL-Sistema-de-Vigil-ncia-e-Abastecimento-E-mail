@@ -1,8 +1,7 @@
-
 import React, { useState, useMemo, useEffect, Component, ReactNode } from 'react';
 import { Routes, Route, useNavigate, Link } from 'react-router-dom';
 import { PurchaseOrder, OrderStatus, ProductClass, PurchaseRequestItem } from '../types';
-import { PRODUCT_CLASSES, CLASS_ICONS } from '../constants';
+import { PRODUCT_CLASSES, CLASS_ICONS } from '../constants.tsx';
 import { supabase } from '../supabase';
 
 // --- INTERFACES ---
@@ -15,17 +14,22 @@ interface TrackingProps {
 }
 
 // --- ERROR BOUNDARY ---
-interface EBProps { children: ReactNode; }
-interface EBState { hasError: boolean; error: any; }
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
 
-class ErrorBoundary extends Component<EBProps, EBState> {
-  constructor(props: EBProps) {
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: any): EBState {
-    return { hasError: true, error };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
   componentDidCatch(error: any, errorInfo: any) {
@@ -171,7 +175,13 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
   );
 };
 
-const FolderUploadCard: React.FC<{ groupKey: string, onExtract: (file: File) => void, isExtracting: boolean }> = ({ groupKey, onExtract, isExtracting }) => (
+interface FolderUploadProps {
+  groupKey: string;
+  onExtract: (file: File) => void;
+  isExtracting: boolean;
+}
+
+const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, isExtracting }) => (
   <label
     className={`bg-white dark:bg-[#0f2626] border-4 border-dashed rounded-[3rem] p-12 flex flex-col items-center justify-center transition-all cursor-pointer group shadow-inner mb-6 ${isExtracting ? 'border-primary dark:border-blue-600 bg-primary/5 dark:bg-blue-900/10 cursor-wait' : 'border-slate-100 dark:border-slate-800 hover:border-primary dark:hover:border-blue-500 hover:bg-slate-50 dark:hover:bg-slate-900'}`}
   >
@@ -180,9 +190,12 @@ const FolderUploadCard: React.FC<{ groupKey: string, onExtract: (file: File) => 
     </div>
     <div className="text-center space-y-2">
       <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">{isExtracting ? 'PROCESSANDO DOCUMENTO...' : 'CLIQUE OU ARRASTE O PDF AQUI'}</h4>
-      <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Extração Inteligente: Processo &rarr; Fornecedor &rarr; Itens</p>
+      <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Extração Inteligente: Processo - Fornecedor - Itens</p>
     </div>
-    <input type="file" className="hidden" accept=".pdf" onChange={e => e.target.files?.[0] && onExtract(e.target.files[0])} disabled={isExtracting} />
+    <input type="file" className="hidden" accept=".pdf" onChange={e => {
+      const file = e.target.files?.[0];
+      if (file) onExtract(file);
+    }} disabled={isExtracting} />
   </label>
 );
 
@@ -215,8 +228,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       const identifiedDelivery = "5 dias úteis";
 
       // 1. Atualizar o Banco de Dados (Supabase) para que a extração persista
-      // Buscamos todas as ordens desse grupo (mesmo Quotation-Solicitation)
-      const groupOrders = orders.filter(o => `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}` === groupKey);
+      const groupOrders = orders.filter(o => `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}` === groupKey || groupKey === 'global');
 
       for (const orderToUpdate of groupOrders) {
         await supabase.from('purchase_orders').update({
@@ -224,14 +236,12 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           order_number: identifiedOC,
           expected_delivery_date: identifiedDelivery
         }).eq('id', orderToUpdate.id);
-
-        // Opcional: Marcar itens como confirmados/lidos se houver lógica para isso
       }
 
-      // 2. Atualizar o estado local para feedback imediato na UI
+      // 2. Atualizar o estado local
       setOrders((prev: PurchaseOrder[]) => (prev || []).map(o => {
         const key = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
-        if (key === groupKey) {
+        if (key === groupKey || groupKey === 'global') {
           const items = (o.items || []).map(it => ({
             ...it,
             orderQuantity: it.orderQuantity || 1,
@@ -253,10 +263,46 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     }, 2000);
   };
 
-  if (!selectedClass) {
-    return (
-      <div className="space-y-8 animate-in fade-in">
+  return (
+    <div className="space-y-10 animate-in fade-in pb-20">
+      {/* HEADER DINÂMICO */}
+      {selectedClass ? (
+        <div className="flex justify-between items-center bg-white dark:bg-[#0f2626] p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+          <button onClick={() => setSelectedClass(null)} className="text-primary dark:text-blue-400 font-black flex items-center gap-3 uppercase text-xs tracking-[0.2em] hover:opacity-70">
+            <span className="material-symbols-outlined">arrow_back</span> Voltar
+          </button>
+          <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic">{selectedClass}</h2>
+          <div className="bg-blue-50 dark:bg-blue-900/20 px-5 py-2 rounded-xl text-primary dark:text-blue-400 text-[10px] font-black uppercase tracking-widest">Pasta Ativa</div>
+        </div>
+      ) : (
         <h2 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-widest italic">Triagem de Suprimentos</h2>
+      )}
+
+      {/* ÁREA DE UPLOAD GLOBAL - SEMPRE VISÍVEL */}
+      <div className="bg-white dark:bg-[#0f2626] p-8 rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 shadow-xl overflow-hidden mb-10">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-4">
+          <div className="flex items-center gap-5">
+            <div className="w-14 h-14 bg-primary/10 dark:bg-blue-500/10 text-primary dark:text-blue-400 rounded-2xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-3xl font-black">cloud_upload</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tighter">Iniciar Nova Triagem</h3>
+              <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Selecione o PDF da OC ou Relatório de Fornecedor</p>
+            </div>
+          </div>
+
+          <label className={`cursor-pointer px-10 py-5 rounded-[1.5rem] font-black uppercase text-xs tracking-widest transition-all flex items-center gap-4 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-primary text-white hover:bg-primary/90 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95'}`}>
+            <span className="material-symbols-outlined text-2xl">{isExtracting ? 'sync' : 'clinical_notes'}</span>
+            {isExtracting ? 'Processando...' : 'Extração Inteligente SVA IA'}
+            <input type="file" className="hidden" accept=".pdf" onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) simulateExtract('global', file.name);
+            }} disabled={!!isExtracting} />
+          </label>
+        </div>
+      </div>
+
+      {!selectedClass ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {PRODUCT_CLASSES.map(cls => (
             <div key={cls} onClick={() => setSelectedClass(cls)} className="bg-white dark:bg-[#0f2626] p-10 rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 hover:border-primary dark:hover:border-blue-500 cursor-pointer transition-all shadow-xl group">
@@ -270,88 +316,65 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             </div>
           ))}
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-10 animate-in slide-in-from-right-10 pb-20">
-      <div className="flex justify-between items-center bg-white dark:bg-[#0f2626] p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800">
-        <button onClick={() => setSelectedClass(null)} className="text-primary dark:text-blue-400 font-black flex items-center gap-3 uppercase text-xs tracking-[0.2em] hover:opacity-70">
-          <span className="material-symbols-outlined">arrow_back</span> Voltar
-        </button>
-        <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic">{selectedClass}</h2>
-        <div className="bg-blue-50 dark:bg-blue-900/20 px-5 py-2 rounded-xl text-primary dark:text-blue-400 text-[10px] font-black uppercase tracking-widest">Pasta Ativa</div>
-      </div>
-
-      <div className="space-y-16">
-        {groups.map(([key, groupOrders]) => (
-          <div key={key} className="bg-white dark:bg-[#0f2626] p-10 rounded-[4rem] border-2 border-slate-50 dark:border-slate-800 shadow-2xl space-y-10">
-            {/* Header da Pasta de Cotação */}
-            <div className="flex flex-col lg:flex-row lg:items-center gap-10 pb-10 border-b border-slate-100 dark:border-slate-800 relative">
-              <div className="flex items-center gap-5 flex-1">
-                <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center shadow-2xl">
-                  <span className="material-symbols-outlined text-3xl">folder_zip</span>
-                </div>
-                <div>
-                  <div className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-1">Cotação / Processo</div>
-                  <div className="flex items-baseline gap-4">
-                    <div className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">#{groupOrders?.[0]?.quotationNumber || key.split('-')[0]}</div>
-                    <div className="text-[11px] font-black text-primary dark:text-blue-400 uppercase tracking-widest bg-primary/5 dark:bg-blue-900/10 px-3 py-1 rounded-lg">Pendente de Leitura</div>
+      ) : (
+        <div className="space-y-16">
+          {groups.map(([key, groupOrders]) => (
+            <div key={key} className="bg-white dark:bg-[#0f2626] p-10 rounded-[4rem] border-2 border-slate-50 dark:border-slate-800 shadow-2xl space-y-10">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-10 pb-10 border-b border-slate-100 dark:border-slate-800 relative">
+                <div className="flex items-center gap-5 flex-1">
+                  <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center shadow-2xl">
+                    <span className="material-symbols-outlined text-3xl">folder_zip</span>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-1">Cotação / Processo</div>
+                    <div className="flex items-baseline gap-4">
+                      <div className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">#{groupOrders?.[0]?.quotationNumber || key.split('-')[0]}</div>
+                      <div className="text-[11px] font-black text-primary dark:text-blue-400 uppercase tracking-widest bg-primary/5 dark:bg-blue-900/10 px-3 py-1 rounded-lg">Pendente de Leitura</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="h-12 w-px bg-slate-200 hidden lg:block" />
-
-              <div className="flex items-center gap-8">
-                <label
-                  className={`${isExtracting === key ? 'bg-primary animate-pulse' : 'bg-slate-900'} text-white px-10 py-5 rounded-[1.5rem] text-[11px] font-black uppercase tracking-[0.2em] flex items-center gap-4 hover:shadow-2xl transition-all shadow-xl active:scale-95 disabled:opacity-50 cursor-pointer`}
-                >
-                  <span className="material-symbols-outlined text-2xl">{isExtracting === key ? 'sync' : 'clinical_notes'}</span>
-                  {isExtracting === key ? 'Lendo PDF...' : 'Extração Inteligente'}
-                  <input type="file" className="hidden" accept=".pdf" onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) simulateExtract(key, file.name);
-                  }} disabled={isExtracting === key} />
-                </label>
+              <div className="grid gap-12">
+                <FolderUploadCard groupKey={key} onExtract={(file) => simulateExtract(key, file.name)} isExtracting={isExtracting === key} />
+                {(groupOrders || []).map((o, idx) => (
+                  <SupplierTriageCard
+                    key={o?.id || `card-${idx}`}
+                    order={o}
+                    onConfirm={async (id: string, data: any) => {
+                      const { error } = await supabase.from('purchase_orders').update({
+                        status: OrderStatus.AguardandoEntrega,
+                        supplier_name: data.supplierName,
+                        order_number: data.orderNumber,
+                        expected_delivery_date: data.expectedDeliveryDate
+                      }).eq('id', id);
+                      if (error) alert("Erro na triagem: " + error.message);
+                    }}
+                    onDecline={async (id: string) => {
+                      const { error } = await supabase.from('purchase_orders').update({
+                        status: OrderStatus.Declinado
+                      }).eq('id', id);
+                      if (error) alert("Erro ao declinar pedido: " + error.message);
+                    }}
+                  />
+                ))}
               </div>
             </div>
+          ))}
 
-            {/* Listagem de Cards de fornecedores identificados */}
-            <div className="grid gap-12">
-              <FolderUploadCard groupKey={key} onExtract={(file) => simulateExtract(key, file.name)} isExtracting={isExtracting === key} />
-              {(groupOrders || []).map((o, idx) => (
-                <SupplierTriageCard
-                  key={o?.id || `card-${idx}`}
-                  order={o}
-                  onConfirm={async (id: string, data: any) => {
-                    const { error } = await supabase.from('purchase_orders').update({
-                      status: OrderStatus.AguardandoEntrega,
-                      supplier_name: data.supplierName,
-                      order_number: data.orderNumber,
-                      expected_delivery_date: data.expectedDeliveryDate
-                    }).eq('id', id);
-                    if (error) alert("Erro na triagem: " + error.message);
-                  }}
-                  onDecline={async (id: string) => {
-                    const { error } = await supabase.from('purchase_orders').update({
-                      status: OrderStatus.Declinado
-                    }).eq('id', id);
-                    if (error) alert("Erro ao declinar pedido: " + error.message);
-                  }}
-                />
-              ))}
+          {groups.length === 0 && !isExtracting && (
+            <div className="p-32 text-center space-y-8 bg-white dark:bg-[#0f2626] rounded-[4rem] border-4 border-dashed border-slate-100 dark:border-slate-800 shadow-inner">
+              <div className="w-24 h-24 bg-slate-50 dark:bg-slate-900 text-slate-100 dark:text-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
+                <span className="material-symbols-outlined text-6xl">cloud_off</span>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-black text-slate-300 dark:text-slate-700 uppercase italic tracking-tighter">Nenhuma cotação pendente</h3>
+                <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest max-w-sm mx-auto">Use o botão acima para subir o PDF do fornecedor e iniciar o processo de entrada.</p>
+              </div>
             </div>
-          </div>
-        ))}
-
-        {groups.length === 0 && (
-          <div className="p-40 text-center font-black text-slate-200 italic uppercase bg-white rounded-[4rem] border-4 border-dashed border-slate-100">
-            Nenhuma cotação pendente nesta categoria.
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -22,12 +22,14 @@ const App: React.FC = () => {
   });
 
   // BUSCAR DADOS DO SUPABASE
-  const fetchData = async () => {
+  const fetchData = async (retries = 2): Promise<void> => {
     try {
       // Buscar Produtos
-      const { data: prods } = await supabase
+      const { data: prods, error: prodsErr } = await supabase
         .from('products')
         .select('*, price_history(*)');
+
+      if (prodsErr) throw prodsErr;
 
       if (prods) {
         const mappedProds: Product[] = prods.map(p => ({
@@ -47,9 +49,11 @@ const App: React.FC = () => {
       }
 
       // Buscar Pedidos com itens e produtos
-      const { data: ords } = await supabase
+      const { data: ords, error: ordsErr } = await supabase
         .from('purchase_orders')
         .select('*, order_items(*, product:products(*))');
+
+      if (ordsErr) throw ordsErr;
 
       if (ords) {
         const mappedOrds: PurchaseOrder[] = ords.map(o => ({
@@ -96,9 +100,11 @@ const App: React.FC = () => {
       }
 
       // Buscar Usuários (Profiles)
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesErr } = await supabase
         .from('profiles')
         .select('*');
+
+      if (profilesErr) throw profilesErr;
 
       if (profiles) {
         const mappedUsers: User[] = profiles.map(p => ({
@@ -113,18 +119,25 @@ const App: React.FC = () => {
       }
 
       // Buscar Configurações do Sistema
-      const { data: config } = await supabase
+      const { data: config, error: configErr } = await supabase
         .from('system_settings')
         .select('*')
         .eq('id', 1)
         .single();
 
+      if (configErr) throw configErr;
+
       if (config) {
         (window as any).sva_unit_name = config.unit_name;
         (window as any).sva_report_email = config.report_email;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao carregar dados do Supabase:", error);
+      if (retries > 0 && (error.message?.includes('abort') || error.status === 0)) {
+        console.log(`Tentando novamente... (${retries} restantes)`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return fetchData(retries - 1);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -139,41 +152,68 @@ const App: React.FC = () => {
     fetchData();
 
     // Listen for changes
-    const productsSub = supabase.channel('products_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchData).subscribe();
-    const ordersSub = supabase.channel('orders_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, fetchData).subscribe();
-    const itemsSub = supabase.channel('items_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, fetchData).subscribe();
-    const profilesSub = supabase.channel('profiles_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, fetchData).subscribe();
+    const productsSub = supabase.channel('products_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData()).subscribe();
+    const ordersSub = supabase.channel('orders_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, () => fetchData()).subscribe();
+    const itemsSub = supabase.channel('items_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => fetchData()).subscribe();
+    const profilesSub = supabase.channel('profiles_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchData()).subscribe();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
+    const fetchUserProfile = async (userId: string, retries = 2): Promise<void> => {
+      try {
+        const { data: profile, error, status } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
 
-          if (profile) {
-            const mappedUser: User = {
-              id: session.user.id,
-              name: profile.full_name || session.user.email?.split('@')[0] || 'Unknown',
-              email: session.user.email || '',
-              cpf: profile.cpf || '',
-              sector: profile.sector || 'ADMINISTRAÇÃO',
-              profile: (profile.role as AccessProfile) || AccessProfile.Visualizador
-            };
-            setCurrentUser(mappedUser);
-            setIsAuthenticated(true);
+        if (error) {
+          if (retries > 0 && (error.message?.includes('abort') || status === 0)) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            return fetchUserProfile(userId, retries - 1);
           }
-        } catch (err) {
-          console.error("Erro ao buscar perfil:", err);
+          throw error;
         }
-      } else {
-        setCurrentUser(null);
-        setIsAuthenticated(false);
+
+        if (profile) {
+          setCurrentUser({
+            id: userId,
+            name: profile.full_name || 'Usuário',
+            email: profile.email || '',
+            cpf: profile.cpf || '',
+            sector: profile.sector || 'ADMINISTRAÇÃO',
+            profile: (profile.role as AccessProfile) || AccessProfile.Visualizador
+          });
+        }
+      } catch (err) {
+        console.error("Erro ao buscar perfil:", err);
+        // Fallback para não travar o app se o perfil falhar mas a sessão for válida
+        if (!currentUser) {
+          setCurrentUser({
+            id: userId,
+            name: 'Usuário',
+            email: '',
+            cpf: '',
+            sector: 'GERAL',
+            profile: AccessProfile.Visualizador
+          });
+        }
+      } finally {
+        setIsLoading(false);
+        clearTimeout(safetyTimeout);
       }
-      setIsLoading(false);
-      clearTimeout(safetyTimeout);
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        // Marca como autenticado imediatamente para permitir navegação
+        setIsAuthenticated(true);
+        // Busca o perfil em segundo plano
+        fetchUserProfile(session.user.id);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setIsLoading(false);
+        clearTimeout(safetyTimeout);
+      }
     });
 
     return () => {

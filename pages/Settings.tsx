@@ -62,6 +62,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, users, setUser
 
   const isAdmin = currentUser?.profile === AccessProfile.Administrador;
 
+  // Função para aplicar máscara de CPF em tempo real
+  const maskCPF = (value: string) => {
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1');
+  };
+
   const handleOpenModal = (user?: User) => {
     if (user) {
       setEditingUser(user);
@@ -415,7 +425,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, users, setUser
                     placeholder="000.000.000-00"
                     className="w-full bg-[#f4f7f6] dark:bg-[#051414] border-none rounded-3xl px-8 py-5 md:px-10 md:py-6 text-base font-bold text-slate-500 dark:text-slate-400 placeholder:text-slate-200 dark:placeholder:text-slate-800 focus:ring-2 focus:ring-success outline-none transition-all"
                     value={formData.cpf}
-                    onChange={e => setFormData({ ...formData, cpf: e.target.value })}
+                    onChange={e => setFormData({ ...formData, cpf: maskCPF(e.target.value) })}
                   />
                 </div>
               </div>
