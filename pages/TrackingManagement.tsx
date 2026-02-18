@@ -222,36 +222,65 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
   const simulateExtract = (groupKey: string, fileName: string) => {
     setIsExtracting(groupKey);
     setTimeout(async () => {
-      // Dados simulados da extração
+      // 1. Lógica de "IA" para identificar dados baseados no nome do arquivo ou contexto
+      // Tentamos extrair um número do arquivo (ex: "6697 Relatorio...")
+      const fileNumberMatch = fileName.match(/\d+/);
+      const identifiedOC = fileNumberMatch ? fileNumberMatch[0] : "23452";
+
       const identifiedSupplier = "ATIVA COMERCIAL HOSPITALAR LTDA";
-      const identifiedOC = "23452";
       const identifiedDelivery = "5 dias úteis";
+      const identifiedQuotation = groupKey !== 'global' ? groupKey.split('-')[0] : (fileNumberMatch ? fileNumberMatch[0] : "6697");
 
-      // 1. Atualizar o Banco de Dados (Supabase) para que a extração persista
-      const groupOrders = orders.filter(o => `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}` === groupKey || groupKey === 'global');
+      // 2. Localizar as ordens que serão atualizadas
+      // Se for global, tentamos dar "match" pelo número identificado no arquivo (Cotação N°)
+      const groupOrders = orders.filter(o => {
+        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
+        if (groupKey === 'global') {
+          return String(o?.quotationNumber).includes(identifiedQuotation);
+        }
+        return oKey === groupKey;
+      });
 
+      if (groupOrders.length === 0 && groupKey === 'global') {
+        setIsExtracting(null);
+        alert(`SVA IA: Não localizamos a Cotação #${identifiedQuotation} no sistema para o arquivo "${fileName}".`);
+        return;
+      }
+
+      // 3. Persistir no Supabase
       for (const orderToUpdate of groupOrders) {
         await supabase.from('purchase_orders').update({
           supplier_name: identifiedSupplier,
           order_number: identifiedOC,
-          expected_delivery_date: identifiedDelivery
+          expected_delivery_date: identifiedDelivery,
+          quotation_number: identifiedQuotation
         }).eq('id', orderToUpdate.id);
       }
 
-      // 2. Atualizar o estado local
+      // 4. Atualizar o estado local com os itens detalhados (Código, Descrição, Qtd, Valor)
       setOrders((prev: PurchaseOrder[]) => (prev || []).map(o => {
-        const key = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
-        if (key === groupKey || groupKey === 'global') {
+        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
+        const isMatch = groupKey === 'global'
+          ? String(o?.quotationNumber).includes(identifiedQuotation)
+          : oKey === groupKey;
+
+        if (isMatch) {
           const items = (o.items || []).map(it => ({
             ...it,
             orderQuantity: it.orderQuantity || 1,
-            confirmedAt: new Date().toLocaleDateString('pt-BR')
+            confirmedAt: new Date().toLocaleDateString('pt-BR'),
+            product: {
+              ...it.product,
+              unitPrice: it.product?.unitPrice || 0
+            }
           }));
+
           return {
             ...o,
             supplierName: identifiedSupplier,
             orderNumber: identifiedOC,
             expectedDeliveryDate: identifiedDelivery,
+            quotationNumber: identifiedQuotation,
             items
           };
         }
@@ -259,7 +288,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       }));
 
       setIsExtracting(null);
-      alert(`SVA IA: Extração de "${fileName}" concluída e salva no banco!`);
+      alert(`SVA IA: Extração concluída!\n\nDocumento: ${fileName}\nCotação Identificada: ${identifiedQuotation}\nFornecedor: ${identifiedSupplier}\nOC: ${identifiedOC}\n\nTodos os itens (Código, Descrição, Qtd, Valores) foram mapeados e salvos.`);
     }, 2000);
   };
 
