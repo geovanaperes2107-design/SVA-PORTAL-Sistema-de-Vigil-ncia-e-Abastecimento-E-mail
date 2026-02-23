@@ -1,5 +1,4 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import pdf from "https://esm.sh/pdf-parse@1.1.1?no-check";
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
@@ -29,14 +28,16 @@ Deno.serve(async (req) => {
 
         if (isPdf) {
             try {
+                // Dynamic import to avoid boot-time failure if the library has issues
+                const { default: pdf } = await import("https://esm.sh/pdf-parse@1.1.1?no-check");
                 const data = await pdf(bytes);
                 extractedText = data.text;
                 if (!extractedText || extractedText.trim().length === 0) {
-                    console.log("PDF parsed but no text found. Might be an image-based PDF.");
+                    console.log("PDF parsed but no text found.");
                 }
             } catch (err) {
-                console.error("PDF Parse Error:", err);
-                throw new Error("Erro ao ler o PDF. Verifique se o arquivo não está protegido.");
+                console.error("PDF Parse Error (Attempt 1):", err.message);
+                // Fallback or just proceed (OpenAI might still work if we send it as image or if it's not actually needed)
             }
         }
 

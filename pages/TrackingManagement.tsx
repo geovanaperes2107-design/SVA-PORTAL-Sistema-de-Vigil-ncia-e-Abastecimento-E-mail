@@ -379,6 +379,12 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         </div>
       ) : (
         <div className="space-y-16">
+          {/* UPLOAD CARD ESPECÍFICO DA PASTA */}
+          <div className="bg-slate-50/50 dark:bg-slate-900/20 p-8 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800">
+            <h4 className="text-xs font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-6 text-center">Adicionar documentos para {selectedClass}</h4>
+            <FolderUploadCard groupKey="global" onExtract={(file) => realExtract('global', file)} isExtracting={isExtracting === 'global'} />
+          </div>
+
           {groups.map(([key, groupOrders]) => (
             <div key={key} className="bg-white dark:bg-[#0f2626] p-10 rounded-[4rem] border-2 border-slate-50 dark:border-slate-800 shadow-2xl space-y-10">
               <div className="flex flex-col lg:flex-row lg:items-center gap-10 pb-10 border-b border-slate-100 dark:border-slate-800 relative">
