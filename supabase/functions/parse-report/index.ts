@@ -145,15 +145,19 @@ Deno.serve(async (req) => {
                 model: "gpt-4o",
                 messages,
                 response_format: { type: "json_object" },
-                temperature: 0
+                temperature: 0,
+                max_tokens: 4096 // Increased for multiple suppliers/pages
             }),
         });
 
         const aiData = await openaiResponse.json();
         if (aiData.error) {
             console.error("OpenAI Error Response:", JSON.stringify(aiData.error));
+            const isTooLarge = aiData.error.code === "context_length_exceeded";
             return new Response(JSON.stringify({
-                error: `Erro na OpenAI: ${aiData.error.message}`
+                error: isTooLarge
+                    ? "O documento é muito grande para uma única leitura. Por favor, tente enviar menos páginas de cada vez."
+                    : `Erro na OpenAI: ${aiData.error.message}`
             }), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
                 status: 200,
