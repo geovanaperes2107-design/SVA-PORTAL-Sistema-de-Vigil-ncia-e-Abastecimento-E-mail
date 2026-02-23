@@ -65,20 +65,26 @@ Deno.serve(async (req) => {
         }
 
         const prompt = `
-      Extraia os dados deste relatório de produtos confirmados organizando por fornecedor. 
-      Para cada bloco de fornecedor, identifique e capture os seguintes campos:
+      Você é um especialista em logística hospitalar. Analise este relatório da "Apoio Cotações" e extraia os dados organizando por fornecedor (âncora de repetição).
+      
+      INSTRUÇÕES DE EXTRAÇÃO:
+      1. Para cada fornecedor (geralmente identificado por um bloco de título com o nome da empresa), extraia:
+         - Identificação: Número da Cotação (Quotation Number) e Título.
+         - Dados do Fornecedor: Nome Fantasia, CNPJ, E-mail e Número da Ordem de Compra.
+         - Logística: Prazo de Entrega (Delivery Deadline) em dias.
+         - Itens: Uma lista completa de itens confirmados, incluindo código, descrição, quantidade, valor unitário, valor total e unidade de medida.
 
-      1. Identificação do Pedido: Número da Cotação, Título.
-      2. Dados do Fornecedor: Nome Fantasia (localizado acima de 'Dados do fornecedor'), CNPJ e E-mail, Número da Ordem de Compra.
-      3. Logística de Entrega: Prazo de Entrega (em dias).
-      4. Tabela de Itens: Para cada item confirmado, extraia: Código do Produto, Descrição, Quantidade, Valor Unitário e Valor Total.
+      2. Regras de Negócio:
+         - Se o valor total de um item não estiver explícito, calcule (Quantidade * Valor Unitário).
+         - Normalize nomes de fornecedores e remova espaços extras.
+         - Retorne APENAS o JSON no formato especificado abaixo.
 
       DADOS BRUTOS (TEXTO EXTRAÍDO):
       ---
-      ${isPdf ? extractedText : "(Documento enviado como imagem - use visão para extrair)"}
+      ${isPdf ? (extractedText || "Nenhum texto extraído.") : "(Documento enviado como imagem - use visão para extrair)"}
       ---
 
-      RETORNE APENAS UM JSON VÁLIDO no seguinte formato:
+      FORMATO DE SAÍDA:
       {
         "quotationNumber": "string",
         "quotationTitle": "string",
@@ -124,14 +130,13 @@ Deno.serve(async (req) => {
         ];
 
         // Se for PDF mas não extraiu texto, provavelmente é um scan.
-        // gpt-4o não aceita PDF no image_url, então precisamos avisar o usuário.
         if (isPdf && (!extractedText || extractedText.trim().length === 0)) {
             console.error("PDF detected but no text extracted (likely a scan).");
             return new Response(JSON.stringify({
-                error: "Não foi possível extrair texto deste PDF (pode ser uma imagem/escaneado). Por favor, use um PDF com texto selecionável ou envie como imagem (JPG/PNG)."
+                error: "Este PDF parece ser uma imagem ou estar escaneado, o que impede a extração direta de texto. \n\nDICA: Tente tirar um print (screenshot) das partes principais do relatório e envie como imagem (JPG/PNG). Nosso sistema consegue ler imagens perfeitamente!"
             }), {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
-                status: 200, // Return 200 so frontend can read the JSON error
+                status: 200, 
             });
         }
 
