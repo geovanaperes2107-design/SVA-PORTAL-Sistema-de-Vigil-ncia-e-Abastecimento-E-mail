@@ -111,17 +111,29 @@ Deno.serve(async (req) => {
             },
             {
                 role: "user",
-                content: isPdf ? prompt : [
+                content: (extractedText && extractedText.trim().length > 0) ? prompt : [
                     { type: "text", text: prompt },
                     {
                         type: "image_url",
                         image_url: {
-                            url: "data:image/jpeg;base64," + fileBase64
+                            url: `data:image/jpeg;base64,${fileBase64}`
                         }
                     }
                 ]
             }
         ];
+
+        // Se for PDF mas não extraiu texto, provavelmente é um scan.
+        // gpt-4o não aceita PDF no image_url, então precisamos avisar o usuário.
+        if (isPdf && (!extractedText || extractedText.trim().length === 0)) {
+            console.error("PDF detected but no text extracted (likely a scan).");
+            return new Response(JSON.stringify({
+                error: "Não foi possível extrair texto deste PDF (pode ser uma imagem/escaneado). Por favor, use um PDF com texto selecionável ou envie como imagem (JPG/PNG)."
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 200, // Return 200 so frontend can read the JSON error
+            });
+        }
 
         const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
@@ -130,17 +142,26 @@ Deno.serve(async (req) => {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                model: "gpt-4o", // Always use 4o for better reasoning in multi-supplier scenarios
+                model: "gpt-4o",
                 messages,
                 response_format: { type: "json_object" },
-                temperature: 0 // Keep it deterministic
+                temperature: 0
             }),
         });
 
         const aiData = await openaiResponse.json();
-        if (aiData.error) throw new Error("OpenAI Error: " + aiData.error.message);
+        if (aiData.error) {
+            console.error("OpenAI Error Response:", JSON.stringify(aiData.error));
+            return new Response(JSON.stringify({
+                error: `Erro na OpenAI: ${aiData.error.message}`
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 200,
+            });
+        }
 
         const result = JSON.parse(aiData.choices[0].message.content);
+        console.log("Extraction successful.");
 
         return new Response(JSON.stringify(result), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -148,10 +169,10 @@ Deno.serve(async (req) => {
         });
 
     } catch (error) {
-        console.error("Function Error:", error.message);
-        return new Response(JSON.stringify({ error: error.message }), {
+        console.error("Critical Function Error:", error.message);
+        return new Response(JSON.stringify({ error: "Erro interno na função: " + error.message }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 400,
+            status: 200,
         });
     }
 });
