@@ -272,7 +272,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')
         ) || groupOrders[0];
 
-        const totalValue = (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
+        const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
 
         if (!targetOrder) {
           // CREATE NEW ORDER
@@ -281,6 +281,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             order_number: supplierData.orderNumber,
             expected_delivery_date: supplierData.deliveryDeadline,
             quotation_number: identifiedQuotation,
+            quotation_title: data.quotationTitle || null,
             total_value: totalValue,
             status: OrderStatus.Triagem,
             product_class: selectedClass || null
@@ -298,6 +299,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             order_number: supplierData.orderNumber || targetOrder.orderNumber,
             expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
             quotation_number: identifiedQuotation,
+            quotation_title: data.quotationTitle || targetOrder.quotationTitle,
             total_value: totalValue,
             status: OrderStatus.Triagem
           }).eq('id', targetOrder.id);

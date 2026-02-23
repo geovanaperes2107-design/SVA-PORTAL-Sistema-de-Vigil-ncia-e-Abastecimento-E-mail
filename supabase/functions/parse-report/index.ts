@@ -65,34 +65,28 @@ Deno.serve(async (req) => {
         }
 
         const prompt = `
-      Você é um especialista em logística hospitalar e análise de documentos fiscais/pedidos de compra.
-      Sua tarefa é extrair os dados do "Relatório de Produtos Confirmados" ou OC.
-      
-      IMPORTANTE: O documento pode (e provavelmente vai) conter MÚLTIPLOS FORNECEDORES.
-      Cada fornecedor tem seu próprio bloco de itens, número de OC e prazo de entrega.
-      NÃO misture itens de fornecedores diferentes.
-      
-      DADOS BRUTOS (TEXTO EXTRAÍDO DO PDF):
+      Extraia os dados deste relatório de produtos confirmados organizando por fornecedor. 
+      Para cada bloco de fornecedor, identifique e capture os seguintes campos:
+
+      1. Identificação do Pedido: Número da Cotação, Título.
+      2. Dados do Fornecedor: Nome Fantasia (localizado acima de 'Dados do fornecedor'), CNPJ e E-mail, Número da Ordem de Compra.
+      3. Logística de Entrega: Prazo de Entrega (em dias).
+      4. Tabela de Itens: Para cada item confirmado, extraia: Código do Produto, Descrição, Quantidade, Valor Unitário e Valor Total.
+
+      DADOS BRUTOS (TEXTO EXTRAÍDO):
       ---
       ${isPdf ? extractedText : "(Documento enviado como imagem - use visão para extrair)"}
       ---
 
-      INSTRUÇÕES DE EXTRAÇÃO:
-      1. Identifique o Número da Cotação (Quotation Number) global do relatório.
-      2. Identifique CADA fornecedor individualmente.
-      3. Para cada fornecedor, extraia:
-         - Nome exato do Fornecedor.
-         - Número da OC (Ordem de Compra) correspondente a ele.
-         - Prazo de entrega (Deadline).
-         - Lista completa de itens confirmados para ESSE fornecedor.
-      4. Para cada item, extraia: Código (Code), Descrição (Description), Quantidade (Quantity), Preço Unitário (UnitPrice) e Unidade (Unit).
-
       RETORNE APENAS UM JSON VÁLIDO no seguinte formato:
       {
         "quotationNumber": "string",
+        "quotationTitle": "string",
         "suppliers": [
           {
             "name": "string",
+            "cnpj": "string",
+            "email": "string",
             "orderNumber": "string",
             "deliveryDeadline": "string",
             "items": [
@@ -101,6 +95,7 @@ Deno.serve(async (req) => {
                 "description": "string",
                 "quantity": number,
                 "unitPrice": number,
+                "totalValue": number,
                 "unit": "string"
               }
             ]
