@@ -272,47 +272,103 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')
         ) || groupOrders[0];
 
-        if (!targetOrder) continue;
+        const totalValue = (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
 
-        const items = (supplierData.items || []).map((it: any, i: number) => ({
-          id: `ext-${targetOrder.id}-${i}`,
-          order_id: targetOrder.id,
-          product_id: `prod-${it.code || i}`,
-          orderQuantity: it.quantity || 0,
-          totalValueOC: (it.quantity || 0) * (it.unitPrice || 0),
-          confirmedAt: new Date().toLocaleDateString('pt-BR'),
-          product: {
-            name: it.description || it.name,
-            unit: it.unit || 'un',
-            codeMVSES: it.code || '---',
-            unitPrice: it.unitPrice || 0
+        if (!targetOrder) {
+          // CREATE NEW ORDER
+          const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
+            supplier_name: supplierData.name,
+            order_number: supplierData.orderNumber,
+            expected_delivery_date: supplierData.deliveryDeadline,
+            quotation_number: identifiedQuotation,
+            total_value: totalValue,
+            status: OrderStatus.Triagem,
+            product_class: selectedClass || null
+          }).select().single();
+
+          if (insertError) {
+            console.error("Error creating new order:", insertError);
+            continue;
           }
-        }));
+          targetOrder = newOrderData as PurchaseOrder;
+        } else {
+          // UPDATE EXISTING ORDER
+          await supabase.from('purchase_orders').update({
+            supplier_name: supplierData.name,
+            order_number: supplierData.orderNumber || targetOrder.orderNumber,
+            expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
+            quotation_number: identifiedQuotation,
+            total_value: totalValue,
+            status: OrderStatus.Triagem
+          }).eq('id', targetOrder.id);
+        }
 
-        const totalValue = items.reduce((sum: number, it: any) => sum + it.totalValueOC, 0);
+        // Process Items
+        const itemsToInsert = [];
+        const processedItems = [];
+
+        for (const [i, it] of (supplierData.items || []).entries()) {
+          // 1. Check/Create Product
+          let productId;
+          const { data: existingProd } = await supabase.from('products')
+            .select('id')
+            .or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`)
+            .maybeSingle();
+
+          if (existingProd) {
+            productId = existingProd.id;
+          } else {
+            const { data: newProd, error: prodErr } = await supabase.from('products').insert({
+              name: it.description || it.name || 'Produto Extraído',
+              code_mv_ses: it.code || null,
+              unit: it.unit || 'un',
+              unit_price: it.unitPrice || 0,
+              product_class: selectedClass || null
+            }).select().single();
+            productId = newProd?.id || `ext-prod-${Date.now()}-${i}`;
+          }
+
+          const itemData = {
+            order_id: targetOrder.id,
+            product_id: productId,
+            order_quantity: it.quantity || 0,
+            total_value_oc: (it.quantity || 0) * (it.unitPrice || 0),
+          };
+
+          itemsToInsert.push(itemData);
+          processedItems.push({
+            ...itemData,
+            id: `new-${targetOrder.id}-${i}`,
+            orderQuantity: it.quantity || 0,
+            totalValueOC: (it.quantity || 0) * (it.unitPrice || 0),
+            product: {
+              name: it.description || it.name,
+              unit: it.unit || 'un',
+              codeMVSES: it.code || '---',
+              unitPrice: it.unitPrice || 0
+            }
+          });
+        }
+
+        if (itemsToInsert.length > 0) {
+          // Clean existing items for this order (optional, but keep it clean)
+          await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
+          // Insert new ones
+          await supabase.from('order_items').insert(itemsToInsert);
+        }
 
         const updated = {
           ...targetOrder,
           status: OrderStatus.Triagem,
           supplierName: supplierData.name,
           orderNumber: supplierData.orderNumber || targetOrder.orderNumber,
-          expectedDeliveryDate: supplierData.deliveryDeadline || "Verificar no PDF",
+          expectedDeliveryDate: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
           quotationNumber: identifiedQuotation,
-          items: items as any,
+          items: processedItems as any,
           totalValue: totalValue
         };
 
         updatedOrders.push(updated);
-
-        // Persist
-        await supabase.from('purchase_orders').update({
-          supplier_name: updated.supplierName,
-          order_number: updated.orderNumber,
-          expected_delivery_date: updated.expectedDeliveryDate,
-          quotation_number: updated.quotationNumber,
-          total_value: updated.totalValue,
-          status: OrderStatus.Triagem
-        }).eq('id', updated.id);
       }
 
       // UI Update
