@@ -239,8 +239,14 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         body: { fileBase64, fileName: file.name }
       });
 
-      if (error) throw error;
-      if (!data || data.error) throw new Error(data?.error || "Falha na extração");
+      if (error) {
+        console.error("Invoke error details:", error);
+        throw new Error(`Erro na conexão com o servidor: ${error.message}`);
+      }
+
+      if (!data || data.error) {
+        throw new Error(data?.error || "Falha na extração inteligente");
+      }
 
       const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
 

@@ -9,13 +9,36 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
+    console.log(`[REQUEST] Method: ${req.method} | URL: ${req.url}`);
+
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
     }
 
     try {
-        const { fileBase64, fileName } = await req.json();
-        if (!fileBase64) throw new Error("Missing file data");
+        if (!OPENAI_API_KEY) {
+            console.error("CRITICAL: OPENAI_API_KEY is not set in environment variables.");
+            return new Response(JSON.stringify({
+                error: "Configuração ausente: OPENAI_API_KEY não encontrada no Supabase. Por favor, adicione-a nos Secrets da Edge Function."
+            }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+            });
+        }
+
+        const bodyText = await req.text();
+        console.log(`[BODY] Received length: ${bodyText.length}`);
+
+        let fileBase64, fileName;
+        try {
+            const parsed = JSON.parse(bodyText);
+            fileBase64 = parsed.fileBase64;
+            fileName = parsed.fileName;
+        } catch (e) {
+            throw new Error("Invalid JSON body received.");
+        }
+
+        if (!fileBase64) throw new Error("Missing fileBase64 in request body.");
 
         const binaryString = atob(fileBase64);
         const bytes = new Uint8Array(binaryString.length);
