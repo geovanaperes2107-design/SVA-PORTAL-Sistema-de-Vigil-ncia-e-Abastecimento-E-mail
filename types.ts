@@ -110,4 +110,5 @@ export interface PurchaseOrder {
   reliabilityIndex?: number;
   quotationTitle?: string;
   responsibleBuyer?: string;
+  cnpj?: string;
 }

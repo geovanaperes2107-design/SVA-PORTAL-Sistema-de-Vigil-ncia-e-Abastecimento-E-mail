@@ -99,7 +99,7 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
         cnpj: (order as any).cnpj || ''
       });
     }
-  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, (order as any).cnpj]);
+  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, order?.cnpj]);
 
   if (!order || !localData) return null;
 
@@ -232,7 +232,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       if (file.type === 'application/pdf') {
         const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
         // Use a CDN worker to avoid local configuration issues in Vite/Supabase context
-        GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+        GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`;
 
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await getDocument({ data: arrayBuffer }).promise;
@@ -246,7 +246,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           canvas.width = viewport.width;
 
           if (context) {
-            await page.render({ canvasContext: context, viewport }).promise;
+            await page.render({ canvasContext: context, viewport, canvas }).promise;
             const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
             images.push(base64);
           }
