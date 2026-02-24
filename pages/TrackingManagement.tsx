@@ -95,10 +95,11 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
       setLocalData({
         supplierName: order.supplierName || '',
         orderNumber: order.orderNumber || '',
-        expectedDeliveryDate: order.expectedDeliveryDate || ''
+        expectedDeliveryDate: order.expectedDeliveryDate || '',
+        cnpj: (order as any).cnpj || ''
       });
     }
-  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate]);
+  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, (order as any).cnpj]);
 
   if (!order || !localData) return null;
 
@@ -114,6 +115,10 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
             <input className="w-full bg-slate-800 dark:bg-[#0f2626] border-none rounded-2xl px-6 py-4 text-white font-black text-lg focus:ring-2 focus:ring-primary outline-none shadow-inner" placeholder="Nome do Fornecedor" value={localData.supplierName} onChange={e => setLocalData({ ...localData, supplierName: e.target.value })} />
           </div>
           <div className="flex gap-6">
+            <div className="flex-1 space-y-1">
+              <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">CNPJ (Faturar para)</label>
+              <input className="w-full bg-slate-800 dark:bg-[#0f2626] border-none rounded-2xl px-6 py-4 text-white font-bold focus:ring-2 focus:ring-primary outline-none shadow-inner" placeholder="CNPJ" value={localData.cnpj} onChange={e => setLocalData({ ...localData, cnpj: e.target.value })} />
+            </div>
             <div className="flex-1 space-y-1">
               <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">Ordem de Compra (OC)</label>
               <input className="w-full bg-slate-800 dark:bg-[#0f2626] border-none rounded-2xl px-6 py-4 text-white font-bold focus:ring-2 focus:ring-primary outline-none shadow-inner" placeholder="OC" value={localData.orderNumber} onChange={e => setLocalData({ ...localData, orderNumber: e.target.value })} />
@@ -192,7 +197,7 @@ const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, is
       <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">{isExtracting ? 'PROCESSANDO DOCUMENTO...' : 'CLIQUE OU ARRASTE O PDF AQUI'}</h4>
       <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Extração Inteligente: Processo - Fornecedor - Itens</p>
     </div>
-    <input type="file" className="hidden" accept=".pdf" onChange={e => {
+    <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
       const file = e.target.files?.[0];
       if (file) onExtract(file);
     }} disabled={isExtracting} />
@@ -222,31 +227,48 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
   const realExtract = async (groupKey: string, file: File) => {
     setIsExtracting(groupKey);
     try {
-      // 1. Convert File to Base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const base64 = (reader.result as string).split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      const fileBase64 = await base64Promise;
+      let images: string[] = [];
 
-      // 2. Call Supabase Edge Function
+      if (file.type === 'application/pdf') {
+        const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
+        // Use a CDN worker to avoid local configuration issues in Vite/Supabase context
+        GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await getDocument({ data: arrayBuffer }).promise;
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          if (context) {
+            await page.render({ canvasContext: context, viewport }).promise;
+            const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+            images.push(base64);
+          }
+        }
+      } else {
+        // Handle direct image uploads (JPG/PNG)
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(file);
+        images.push(await base64Promise);
+      }
+
+      // 2. Call Supabase Edge Function with Multi-Image Support
       const { data, error } = await supabase.functions.invoke('parse-report', {
-        body: { fileBase64, fileName: file.name }
+        body: { images, fileName: file.name }
       });
 
-      if (error) {
-        console.error("Invoke error details:", error);
-        throw new Error(`Erro na conexão com o servidor: ${error.message}`);
-      }
-
-      if (!data || data.error) {
-        throw new Error(data?.error || "Falha na extração inteligente");
-      }
+      if (error) throw new Error(`Erro na conexão com SVA IA: ${error.message}`);
+      if (!data || data.error) throw new Error(data?.error || "Falha na extração inteligente");
 
       const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
 
@@ -254,10 +276,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       const groupOrders = orders.filter(o => {
         const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
         const idQNum = String(identifiedQuotation).replace(/\D/g, '');
-
-        if (groupKey === 'global') {
-          return qNum.includes(idQNum) || idQNum.includes(qNum);
-        }
+        if (groupKey === 'global') return qNum.includes(idQNum) || idQNum.includes(qNum);
         const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
         return oKey === groupKey;
       });
@@ -268,8 +287,9 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       for (const supplierData of (data.suppliers || [])) {
         // Find existing order for this supplier or use the first available in group
         let targetOrder = groupOrders.find(o =>
-          o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
-          supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')
+          (o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
+           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')) ||
+          (o.cnpj && supplierData.cnpj && o.cnpj.replace(/\D/g, '') === supplierData.cnpj.replace(/\D/g, ''))
         ) || groupOrders[0];
 
         const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
@@ -278,6 +298,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           // CREATE NEW ORDER
           const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
             supplier_name: supplierData.name,
+            cnpj: supplierData.cnpj || null,
             order_number: supplierData.orderNumber,
             expected_delivery_date: supplierData.deliveryDeadline,
             quotation_number: identifiedQuotation,
@@ -296,6 +317,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           // UPDATE EXISTING ORDER
           await supabase.from('purchase_orders').update({
             supplier_name: supplierData.name,
+            cnpj: supplierData.cnpj || targetOrder.cnpj,
             order_number: supplierData.orderNumber || targetOrder.orderNumber,
             expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
             quotation_number: identifiedQuotation,
@@ -419,7 +441,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           <label className={`cursor-pointer px-10 py-5 rounded-[1.5rem] font-black uppercase text-xs tracking-widest transition-all flex items-center gap-4 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-primary text-white hover:bg-primary/90 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95'}`}>
             <span className="material-symbols-outlined text-2xl">{isExtracting ? 'sync' : 'clinical_notes'}</span>
             {isExtracting ? 'Processando...' : 'Extração Inteligente SVA IA'}
-            <input type="file" className="hidden" accept=".pdf" onChange={e => {
+            <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
               const file = e.target.files?.[0];
               if (file) realExtract('global', file);
             }} disabled={!!isExtracting} />
@@ -476,6 +498,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                       const { error } = await supabase.from('purchase_orders').update({
                         status: OrderStatus.AguardandoEntrega,
                         supplier_name: data.supplierName,
+                        cnpj: data.cnpj,
                         order_number: data.orderNumber,
                         expected_delivery_date: data.expectedDeliveryDate
                       }).eq('id', id);
