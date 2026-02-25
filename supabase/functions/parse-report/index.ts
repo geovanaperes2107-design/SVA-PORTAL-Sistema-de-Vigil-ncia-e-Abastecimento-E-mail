@@ -29,38 +29,41 @@ Deno.serve(async (req) => {
         const bodyText = await req.text();
         console.log(`[BODY] Received length: ${bodyText.length}`);
 
-        let fileBase64, fileName;
+        let images: string[] = [];
+        let fileName: string = "documento.pdf";
+
         try {
             const parsed = JSON.parse(bodyText);
-            fileBase64 = parsed.fileBase64;
-            fileName = parsed.fileName;
+            if (Array.isArray(parsed.images)) {
+                images = parsed.images;
+                console.log(`[INFO] Received ${images.length} images from frontend.`);
+            } else if (parsed.fileBase64) {
+                images = [parsed.fileBase64];
+            }
+            fileName = parsed.fileName || fileName;
         } catch (e) {
             throw new Error("Invalid JSON body received.");
         }
 
-        if (!fileBase64) throw new Error("Missing fileBase64 in request body.");
-
-        const binaryString = atob(fileBase64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
+        if (images.length === 0) throw new Error("Missing images or fileBase64 in request body.");
 
         const isPdf = fileName.toLowerCase().endsWith(".pdf");
         let extractedText = "";
 
-        if (isPdf) {
+        // Only try server-side PDF parsing if we didn't get images from frontend
+        if (isPdf && images.length === 1 && !bodyText.includes('"images"')) {
             try {
-                // Dynamic import to avoid boot-time failure if the library has issues
+                const binaryString = atob(images[0]);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
                 const { default: pdf } = await import("https://esm.sh/pdf-parse@1.1.1?no-check");
                 const data = await pdf(bytes);
                 extractedText = data.text;
-                if (!extractedText || extractedText.trim().length === 0) {
-                    console.log("PDF parsed but no text found.");
-                }
+                console.log(`[INFO] Server-side PDF extraction successful. Length: ${extractedText?.length || 0}`);
             } catch (err) {
-                console.error("PDF Parse Error (Attempt 1):", err.message);
-                // Fallback or just proceed (OpenAI might still work if we send it as image or if it's not actually needed)
+                console.error("PDF Parse Error:", err.message);
             }
         }
 
@@ -78,11 +81,6 @@ Deno.serve(async (req) => {
          - Se o valor total de um item não estiver explícito, calcule (Quantidade * Valor Unitário).
          - Normalize nomes de fornecedores e remova espaços extras.
          - Retorne APENAS o JSON no formato especificado abaixo.
-
-      DADOS BRUTOS (TEXTO EXTRAÍDO):
-      ---
-      ${isPdf ? (extractedText || "Nenhum texto extraído.") : "(Documento enviado como imagem - use visão para extrair)"}
-      ---
 
       FORMATO DE SAÍDA:
       {
@@ -110,6 +108,25 @@ Deno.serve(async (req) => {
       }
     `;
 
+        const userContent: any[] = [{ type: "text", text: prompt }];
+        
+        // Add extracted text if available
+        if (extractedText && extractedText.trim().length > 0) {
+            userContent.push({ type: "text", text: `DADOS EXTRAÍDOS VIA OCR/TEXTO:\n---\n${extractedText}\n---` });
+        }
+
+        // Add images to vision prompt
+        images.forEach((imgBase64, idx) => {
+            userContent.push({
+                type: "image_url",
+                image_url: {
+                    url: `data:image/jpeg;base64,${imgBase64}`,
+                    detail: "high"
+                }
+            });
+            console.log(`[INFO] Added image ${idx + 1}/${images.length} to prompt.`);
+        });
+
         const messages = [
             {
                 role: "system",
@@ -117,28 +134,9 @@ Deno.serve(async (req) => {
             },
             {
                 role: "user",
-                content: (extractedText && extractedText.trim().length > 0) ? prompt : [
-                    { type: "text", text: prompt },
-                    {
-                        type: "image_url",
-                        image_url: {
-                            url: `data:image/jpeg;base64,${fileBase64}`
-                        }
-                    }
-                ]
+                content: userContent
             }
         ];
-
-        // Se for PDF mas não extraiu texto, provavelmente é um scan.
-        if (isPdf && (!extractedText || extractedText.trim().length === 0)) {
-            console.error("PDF detected but no text extracted (likely a scan).");
-            return new Response(JSON.stringify({
-                error: "Este PDF parece ser uma imagem ou estar escaneado, o que impede a extração direta de texto. \n\nDICA: Tente tirar um print (screenshot) das partes principais do relatório e envie como imagem (JPG/PNG). Nosso sistema consegue ler imagens perfeitamente!"
-            }), {
-                headers: { ...corsHeaders, "Content-Type": "application/json" },
-                status: 200, 
-            });
-        }
 
         const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
@@ -147,11 +145,11 @@ Deno.serve(async (req) => {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                model: "gpt-4o",
+                model: "gpt-4o-mini",
                 messages,
                 response_format: { type: "json_object" },
                 temperature: 0,
-                max_tokens: 4096 // Increased for multiple suppliers/pages
+                max_tokens: 4096 
             }),
         });
 
