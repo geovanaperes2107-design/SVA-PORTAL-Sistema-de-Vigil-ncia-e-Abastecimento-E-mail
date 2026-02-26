@@ -281,11 +281,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         return oKey === groupKey;
       });
 
-      // 4. Update and Persist each Order based on AI data
+      // 4. Update and Persist each Order based on processed data
       const updatedOrders: PurchaseOrder[] = [];
 
       for (const supplierData of (data.suppliers || [])) {
-        // Find existing order for this supplier or use the first available in group
         let targetOrder = groupOrders.find(o =>
           (o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
            supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')) ||
@@ -295,7 +294,6 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
 
         if (!targetOrder) {
-          // CREATE NEW ORDER
           const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
             supplier_name: supplierData.name,
             cnpj: supplierData.cnpj || null,
@@ -308,31 +306,23 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             product_class: selectedClass || null
           }).select().single();
 
-          if (insertError) {
-            console.error("Error creating new order:", insertError);
-            continue;
-          }
+          if (insertError) continue;
           targetOrder = newOrderData as PurchaseOrder;
         } else {
-          // UPDATE EXISTING ORDER
           await supabase.from('purchase_orders').update({
             supplier_name: supplierData.name,
             cnpj: supplierData.cnpj || targetOrder.cnpj,
             order_number: supplierData.orderNumber || targetOrder.orderNumber,
             expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
             quotation_number: identifiedQuotation,
-            quotation_title: data.quotationTitle || targetOrder.quotationTitle,
-            total_value: totalValue,
-            status: OrderStatus.Triagem
+            total_value: totalValue
           }).eq('id', targetOrder.id);
         }
 
-        // Process Items
         const itemsToInsert = [];
         const processedItems = [];
 
         for (const [i, it] of (supplierData.items || []).entries()) {
-          // 1. Check/Create Product
           let productId;
           const { data: existingProd } = await supabase.from('products')
             .select('id')
@@ -342,7 +332,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           if (existingProd) {
             productId = existingProd.id;
           } else {
-            const { data: newProd, error: prodErr } = await supabase.from('products').insert({
+            const { data: newProd } = await supabase.from('products').insert({
               name: it.description || it.name || 'Produto Extraído',
               code_mv_ses: it.code || null,
               unit: it.unit || 'un',
@@ -364,7 +354,6 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             ...itemData,
             id: `new-${targetOrder.id}-${i}`,
             orderQuantity: it.quantity || 0,
-            totalValueOC: (it.quantity || 0) * (it.unitPrice || 0),
             product: {
               name: it.description || it.name,
               unit: it.unit || 'un',
@@ -375,13 +364,11 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         }
 
         if (itemsToInsert.length > 0) {
-          // Clean existing items for this order (optional, but keep it clean)
           await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
-          // Insert new ones
           await supabase.from('order_items').insert(itemsToInsert);
         }
 
-        const updated = {
+        updatedOrders.push({
           ...targetOrder,
           status: OrderStatus.Triagem,
           supplierName: supplierData.name,
@@ -390,24 +377,132 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           quotationNumber: identifiedQuotation,
           items: processedItems as any,
           totalValue: totalValue
-        };
-
-        updatedOrders.push(updated);
+        });
       }
 
-      // UI Update
       setOrders((prev: PurchaseOrder[]) => {
         const otherOrders = (prev || []).filter(o => !updatedOrders.some(uo => uo.id === o.id));
         return [...otherOrders, ...updatedOrders];
       });
 
-      alert(`SVA IA: Extração Real Concluída!\n\nDocumento: ${file.name}\nCotação: #${identifiedQuotation}\n\nIdentificamos ${updatedOrders.length} fornecedores com dados reais.`);
+      alert(`Extração Concluída!\n\nDocumento: ${file.name}\nIdentificamos ${updatedOrders.length} fornecedores.`);
     } catch (err: any) {
       console.error("Erro na extração:", err);
-      alert("Erro na Extração Real: " + (err.message || "Verifique o console para detalhes"));
+      alert("Erro na Extração: " + (err.message || "Verifique o console"));
     } finally {
       setIsExtracting(null);
     }
+  };
+
+  const freeExtract = async (file: File) => {
+    setIsExtracting('global');
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      const fileBase64 = await base64Promise;
+
+      const response = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileBase64, fileName: file.name })
+      });
+
+      if (!response.ok) throw new Error('A API da Vercel retornou um erro.');
+      const data = await response.json();
+      
+      // We reuse the update logic here or call a shared helper if we refactored
+      // For now, I'll pass the data to a helper-like block (simulated by repeating logic or refactoring)
+      await applyExtractedData('global', file, data);
+    } catch (err: any) {
+      console.error("Erro na extração gratuita:", err);
+      alert("Erro na Extração Gratuita: " + err.message);
+    } finally {
+      setIsExtracting(null);
+    }
+  };
+
+  // Helper function to avoid code duplication
+  const applyExtractedData = async (groupKey: string, file: File, data: any) => {
+      const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
+      const groupOrders = orders.filter(o => {
+        const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
+        const idQNum = String(identifiedQuotation).replace(/\D/g, '');
+        if (groupKey === 'global') return qNum.includes(idQNum) || idQNum.includes(qNum);
+        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
+        return oKey === groupKey;
+      });
+
+      const updatedOrders: PurchaseOrder[] = [];
+
+      for (const supplierData of (data.suppliers || [])) {
+        let targetOrder = groupOrders.find(o =>
+          (o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
+           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')) ||
+          (o.cnpj && supplierData.cnpj && o.cnpj.replace(/\D/g, '') === supplierData.cnpj.replace(/\D/g, ''))
+        ) || groupOrders[0];
+
+        const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
+
+        if (!targetOrder) {
+          const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
+            supplier_name: supplierData.name,
+            cnpj: supplierData.cnpj || null,
+            order_number: supplierData.orderNumber,
+            expected_delivery_date: supplierData.deliveryDeadline,
+            quotation_number: identifiedQuotation,
+            status: OrderStatus.Triagem,
+            total_value: totalValue,
+            product_class: selectedClass || null
+          }).select().single();
+
+          if (insertError) continue;
+          targetOrder = newOrderData as PurchaseOrder;
+        } else {
+          await supabase.from('purchase_orders').update({
+            supplier_name: supplierData.name,
+            cnpj: supplierData.cnpj || targetOrder.cnpj,
+            order_number: supplierData.orderNumber || targetOrder.orderNumber,
+            expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
+            quotation_number: identifiedQuotation,
+            total_value: totalValue
+          }).eq('id', targetOrder.id);
+        }
+
+        const itemsToInsert = [];
+        const processedItems = [];
+
+        for (const [i, it] of (supplierData.items || []).entries()) {
+          let productId;
+          const { data: existingProd } = await supabase.from('products').select('id').or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`).maybeSingle();
+          if (existingProd) {
+            productId = existingProd.id;
+          } else {
+            const { data: newProd } = await supabase.from('products').insert({ name: it.description || 'Produto Extraído', code_mv_ses: it.code || null, unit: it.unit || 'un', unit_price: it.unitPrice || 0, product_class: selectedClass || null }).select().single();
+            productId = newProd?.id || `ext-prod-${Date.now()}-${i}`;
+          }
+
+          const itemData = { order_id: targetOrder.id, product_id: productId, order_quantity: it.quantity || 0, total_value_oc: (it.quantity || 0) * (it.unitPrice || 0) };
+          itemsToInsert.push(itemData);
+          processedItems.push({ ...itemData, id: `new-${targetOrder.id}-${i}`, orderQuantity: it.quantity || 0, product: { name: it.description || 'Produto', unit: it.unit || 'un', codeMVSES: it.code || '---', unitPrice: it.unitPrice || 0 }});
+        }
+
+        if (itemsToInsert.length > 0) {
+          await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
+          await supabase.from('order_items').insert(itemsToInsert);
+        }
+
+        updatedOrders.push({ ...targetOrder, supplierName: supplierData.name, quotationNumber: identifiedQuotation, items: processedItems as any, totalValue: totalValue });
+      }
+
+      setOrders((prev: PurchaseOrder[]) => {
+        const otherOrders = (prev || []).filter(o => !updatedOrders.some(uo => uo.id === o.id));
+        return [...otherOrders, ...updatedOrders];
+      });
+      alert(`SVA Econômico: Extração Concluída!\n\nIdentificamos ${updatedOrders.length} fornecedores.`);
   };
 
   return (
@@ -438,14 +533,27 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             </div>
           </div>
 
-          <label className={`cursor-pointer px-10 py-5 rounded-[1.5rem] font-black uppercase text-xs tracking-widest transition-all flex items-center gap-4 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-primary text-white hover:bg-primary/90 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95'}`}>
-            <span className="material-symbols-outlined text-2xl">{isExtracting ? 'sync' : 'clinical_notes'}</span>
-            {isExtracting ? 'Processando...' : 'Extração Inteligente SVA IA'}
-            <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) realExtract('global', file);
-            }} disabled={!!isExtracting} />
-          </label>
+          <div className="flex gap-4">
+            {/* Botão SVA IA */}
+            <label className={`cursor-pointer px-8 py-5 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-3 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-slate-900 text-white hover:bg-black shadow-xl shadow-slate-900/20 active:scale-95'}`}>
+              <span className="material-symbols-outlined text-2xl">psychology</span>
+              SVA IA (OpenAI)
+              <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) realExtract('global', file);
+              }} disabled={!!isExtracting} />
+            </label>
+
+            {/* Botão SVA GRÁTIS */}
+            <label className={`cursor-pointer px-8 py-5 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-3 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-primary text-white hover:bg-primary/90 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95'}`}>
+              <span className="material-symbols-outlined text-2xl">auto_awesome</span>
+              SVA Econômico (Grátis)
+              <input type="file" className="hidden" accept=".pdf" onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) freeExtract(file);
+              }} disabled={!!isExtracting} />
+            </label>
+          </div>
         </div>
       </div>
 
