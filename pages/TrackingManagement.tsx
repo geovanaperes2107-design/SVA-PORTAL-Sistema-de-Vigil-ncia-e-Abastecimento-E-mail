@@ -273,7 +273,14 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       });
 
       if (error) throw new Error(`Erro na conexão com SVA IA: ${error.message}`);
-      if (!data || data.error) throw new Error(data?.error || "Falha na extração inteligente");
+      
+      if (data.error === "OPENAI_QUOTA_EXCEEDED") {
+          throw new Error("SALDO INSUFICIENTE NO SVA (OpenAI). Por favor, verifique seu painel de faturamento da OpenAI ou adicione créditos ($5) para continuar.");
+      }
+      
+      if (data.error || !data.suppliers) {
+          throw new Error(data.message || data.error || 'Falha na resposta da IA');
+      }
 
       setExtractionResult(data);
       setWizardStep('verify');
