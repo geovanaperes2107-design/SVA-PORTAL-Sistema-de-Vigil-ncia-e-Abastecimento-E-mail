@@ -87,7 +87,7 @@ const DRERow = ({ label, value, color = "text-slate-600 dark:text-slate-300" }: 
 
 // --- COMPONENTES DE TRIAGEM ---
 
-const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDecline: any }> = ({ order, onConfirm, onDecline }) => {
+const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDecline: any, isNew?: boolean }> = ({ order, onConfirm, onDecline, isNew }) => {
   const [localData, setLocalData] = useState<any>(null);
 
   useEffect(() => {
@@ -99,24 +99,26 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
         cnpj: (order as any).cnpj || ''
       });
     }
-  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, order?.cnpj]);
+  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, (order as any)?.cnpj]);
 
   if (!order || !localData) return null;
 
   return (
-    <div className="bg-white dark:bg-[#0f2626] rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-6">
+    <div className={`bg-white dark:bg-[#0f2626] rounded-[3rem] border-2 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-6 ${isNew ? 'border-primary dark:border-blue-500' : 'border-slate-100 dark:border-slate-800'}`}>
       <div className="bg-slate-900 dark:bg-[#051414] text-white p-10 flex flex-wrap gap-8 items-end">
         <div className="flex-1 space-y-6 min-w-[300px]">
           <div className="flex justify-between items-start mb-4">
-            <div className="bg-primary/20 dark:bg-blue-500/10 text-primary dark:text-blue-400 px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-primary/30 dark:border-blue-500/30">Pendente de Entrada</div>
+            <div className="bg-primary/20 dark:bg-blue-500/10 text-primary dark:text-blue-400 px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-primary/30 dark:border-blue-500/30">
+              {isNew ? 'Novo Fornecedor Identificado' : 'Pendente de Entrada'}
+            </div>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">Fornecedor (Identificado pela IA)</label>
+            <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">Fornecedor</label>
             <input className="w-full bg-slate-800 dark:bg-[#0f2626] border-none rounded-2xl px-6 py-4 text-white font-black text-lg focus:ring-2 focus:ring-primary outline-none shadow-inner" placeholder="Nome do Fornecedor" value={localData.supplierName} onChange={e => setLocalData({ ...localData, supplierName: e.target.value })} />
           </div>
           <div className="flex gap-6">
             <div className="flex-1 space-y-1">
-              <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">CNPJ (Faturar para)</label>
+              <label className="text-xs font-black uppercase text-slate-500 dark:text-slate-600 tracking-widest ml-2">CNPJ</label>
               <input className="w-full bg-slate-800 dark:bg-[#0f2626] border-none rounded-2xl px-6 py-4 text-white font-bold focus:ring-2 focus:ring-primary outline-none shadow-inner" placeholder="CNPJ" value={localData.cnpj} onChange={e => setLocalData({ ...localData, cnpj: e.target.value })} />
             </div>
             <div className="flex-1 space-y-1">
@@ -131,11 +133,13 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
         </div>
         <div className="flex gap-4">
           <button onClick={() => onDecline(order.id)} className="h-20 w-20 bg-danger/10 dark:bg-red-900/10 text-danger hover:bg-danger hover:text-white rounded-[1.5rem] flex items-center justify-center transition-all border border-danger/20 active:scale-90 shadow-lg shadow-danger/20 group">
-            <span className="material-symbols-outlined text-4xl font-black">close</span>
+            <span className="material-symbols-outlined text-4xl font-black">{isNew ? 'delete' : 'close'}</span>
           </button>
-          <button onClick={() => onConfirm(order.id, localData)} className="h-20 w-20 bg-success/10 dark:bg-emerald-900/10 text-success hover:bg-success hover:text-white rounded-[1.5rem] flex items-center justify-center transition-all border border-success/20 active:scale-90 shadow-lg shadow-success/20 group">
-            <span className="material-symbols-outlined text-4xl font-black">verified_user</span>
-          </button>
+          {!isNew && (
+            <button onClick={() => onConfirm(order.id, localData)} className="h-20 w-20 bg-success/10 dark:bg-emerald-900/10 text-success hover:bg-success hover:text-white rounded-[1.5rem] flex items-center justify-center transition-all border border-success/20 active:scale-90 shadow-lg shadow-success/20 group">
+              <span className="material-symbols-outlined text-4xl font-black">verified_user</span>
+            </button>
+          )}
         </div>
       </div>
       <div className="p-10">
@@ -147,7 +151,6 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
               <th className="px-6 py-5 text-center">Quantidade</th>
               <th className="px-6 py-5 text-right">Preço Unit.</th>
               <th className="px-6 py-5 text-right">Total OC</th>
-              <th className="px-6 py-5 text-center">Confirmado em</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
@@ -156,21 +159,20 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
               return (
                 <tr key={it?.id || `tr-${i}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors font-sans">
                   <td className="px-6 py-6 border-r border-slate-50 dark:border-slate-800">
-                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{it?.product?.codeMVSES || '---'}</div>
+                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{it?.product?.codeMVSES || it?.product?.code || '---'}</div>
                     <div className="text-[10px] text-slate-400 dark:text-slate-600 uppercase font-bold">{it?.product?.name || '---'}</div>
                   </td>
                   <td className="px-6 py-6 text-xs text-slate-500 dark:text-slate-600 font-bold uppercase text-center">{it?.product?.unit || '---'}</td>
-                  <td className="px-6 py-6 text-center font-black text-slate-900 dark:text-white text-lg">{it?.orderQuantity || 0}</td>
-                  <td className="px-6 py-6 text-right font-bold text-slate-500 dark:text-slate-600 text-xs">R$ {(it?.product?.unitPrice || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-6 py-6 text-right font-black text-slate-900 dark:text-white text-sm bg-slate-50/30 dark:bg-white/5">R$ {((it?.orderQuantity || 0) * (it?.product?.unitPrice || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-6 py-6 text-center text-[10px] font-black text-slate-400 dark:text-slate-700 uppercase tracking-widest">{(it as any)?.confirmedAt || '---'}</td>
+                  <td className="px-6 py-6 text-center font-black text-slate-900 dark:text-white text-lg">{it?.orderQuantity || it?.quantity || 0}</td>
+                  <td className="px-6 py-6 text-right font-bold text-slate-500 dark:text-slate-600 text-xs">R$ {(it?.product?.unitPrice || it?.unitPrice || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                  <td className="px-6 py-6 text-right font-black text-slate-900 dark:text-white text-sm bg-slate-50/30 dark:bg-white/5">R$ {((it?.orderQuantity || it?.quantity || 0) * (it?.product?.unitPrice || it?.unitPrice || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot className="bg-slate-900 dark:bg-black text-white">
             <tr>
-              <td colSpan={5} className="px-10 py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-700">Valor Total Estimado:</td>
+              <td colSpan={4} className="px-10 py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-700">Valor Total Estimado:</td>
               <td className="px-6 py-6 text-right text-xl font-black tracking-tighter text-primary dark:text-blue-400">R$ {(order?.totalValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
             </tr>
           </tfoot>
@@ -206,7 +208,10 @@ const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, is
 
 const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ orders = [], setOrders }) => {
   const [selectedClass, setSelectedClass] = useState<ProductClass | null>(null);
-  const [isExtracting, setIsExtracting] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState<boolean>(false);
+  const [extractionProgress, setExtractionProgress] = useState<string>('');
+  const [extractionResult, setExtractionResult] = useState<any | null>(null);
+  const [wizardStep, setWizardStep] = useState<'upload' | 'verify'>('upload');
 
   const triagemOrders = useMemo(() => (orders || []).filter(o => o && o.status === OrderStatus.Triagem), [orders]);
 
@@ -224,22 +229,24 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     return Array.from(map.entries());
   }, [triagemOrders, selectedClass]);
 
-  const realExtract = async (groupKey: string, file: File) => {
-    setIsExtracting(groupKey);
+  const professionalExtract = async (file: File) => {
+    setIsExtracting(true);
+    setWizardStep('upload');
+    setExtractionProgress('Iniciando digitalização do documento...');
     try {
       let images: string[] = [];
 
       if (file.type === 'application/pdf') {
         const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
-        // Use a CDN worker to avoid local configuration issues in Vite/Supabase context
         GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(await import('pdfjs-dist/package.json')).version}/build/pdf.worker.min.mjs`;
 
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await getDocument({ data: arrayBuffer }).promise;
         
         for (let i = 1; i <= pdf.numPages; i++) {
+          setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
+          const viewport = page.getViewport({ scale: 2.0 });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           canvas.height = viewport.height;
@@ -247,12 +254,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
           if (context) {
             await page.render({ canvasContext: context, viewport, canvas }).promise;
-            const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-            images.push(base64);
+            images.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
           }
         }
       } else {
-        // Handle direct image uploads (JPG/PNG)
         const reader = new FileReader();
         const base64Promise = new Promise<string>((resolve, reject) => {
           reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -262,7 +267,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         images.push(await base64Promise);
       }
 
-      // 2. Call Supabase Edge Function with Multi-Image Support
+      setExtractionProgress('SVA IA: Identificando fornecedores e itens...');
       const { data, error } = await supabase.functions.invoke('parse-report', {
         body: { images, fileName: file.name }
       });
@@ -270,372 +275,265 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       if (error) throw new Error(`Erro na conexão com SVA IA: ${error.message}`);
       if (!data || data.error) throw new Error(data?.error || "Falha na extração inteligente");
 
-      const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
+      setExtractionResult(data);
+      setWizardStep('verify');
+    } catch (err: any) {
+      console.error("Erro na extração:", err);
+      alert("Erro na Extração: " + (err.message || "Verifique o console"));
+    } finally {
+      setIsExtracting(false);
+      setExtractionProgress('');
+    }
+  };
 
-      // 3. Localize or Update Orders
-      const groupOrders = orders.filter(o => {
-        const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
-        const idQNum = String(identifiedQuotation).replace(/\D/g, '');
-        if (groupKey === 'global') return qNum.includes(idQNum) || idQNum.includes(qNum);
-        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
-        return oKey === groupKey;
-      });
+  const persistVerification = async () => {
+    if (!extractionResult) return;
+    setIsExtracting(true);
+    setExtractionProgress('Persistindo dados no banco de segurança...');
 
-      // 4. Update and Persist each Order based on processed data
+    try {
+      const identifiedQuotation = extractionResult.quotationNumber || "0000";
       const updatedOrders: PurchaseOrder[] = [];
 
-      for (const supplierData of (data.suppliers || [])) {
-        let targetOrder = groupOrders.find(o =>
-          (o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
-           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')) ||
-          (o.cnpj && supplierData.cnpj && o.cnpj.replace(/\D/g, '') === supplierData.cnpj.replace(/\D/g, ''))
-        ) || groupOrders[0];
+      for (const supplierData of (extractionResult.suppliers || [])) {
+        // Encontrar ordem existente ou criar nova
+        const { data: existingOrder } = await supabase.from('purchase_orders')
+          .select('*')
+          .eq('quotation_number', identifiedQuotation)
+          .ilike('supplier_name', `%${supplierData.name}%`)
+          .maybeSingle();
 
-        const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
-
-        if (!targetOrder) {
-          const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
+        let targetOrder;
+        if (existingOrder) {
+          const { data: updated } = await supabase.from('purchase_orders').update({
+            cnpj: supplierData.cnpj || existingOrder.cnpj,
+            order_number: supplierData.orderNumber || existingOrder.order_number,
+            expected_delivery_date: supplierData.deliveryDeadline || existingOrder.expected_delivery_date,
+            total_value: supplierData.totalValue || existingOrder.total_value
+          }).eq('id', existingOrder.id).select().single();
+          targetOrder = updated;
+        } else {
+          const { data: inserted } = await supabase.from('purchase_orders').insert({
             supplier_name: supplierData.name,
             cnpj: supplierData.cnpj || null,
-            order_number: supplierData.orderNumber,
-            expected_delivery_date: supplierData.deliveryDeadline,
+            order_number: supplierData.orderNumber || null,
+            expected_delivery_date: supplierData.deliveryDeadline || null,
             quotation_number: identifiedQuotation,
-            quotation_title: data.quotationTitle || null,
-            total_value: totalValue,
             status: OrderStatus.Triagem,
-            product_class: selectedClass || null
+            product_class: selectedClass || null,
+            total_value: supplierData.totalValue || 0
           }).select().single();
-
-          if (insertError) continue;
-          targetOrder = newOrderData as PurchaseOrder;
-        } else {
-          await supabase.from('purchase_orders').update({
-            supplier_name: supplierData.name,
-            cnpj: supplierData.cnpj || targetOrder.cnpj,
-            order_number: supplierData.orderNumber || targetOrder.orderNumber,
-            expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
-            quotation_number: identifiedQuotation,
-            total_value: totalValue
-          }).eq('id', targetOrder.id);
+          targetOrder = inserted;
         }
 
+        if (!targetOrder) continue;
+
+        // Persistir itens
         const itemsToInsert = [];
-        const processedItems = [];
+        for (const it of (supplierData.items || [])) {
+          const { data: prod } = await supabase.from('products').select('id').or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`).maybeSingle();
+          let productId = prod?.id;
 
-        for (const [i, it] of (supplierData.items || []).entries()) {
-          let productId;
-          const { data: existingProd } = await supabase.from('products')
-            .select('id')
-            .or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`)
-            .maybeSingle();
-
-          if (existingProd) {
-            productId = existingProd.id;
-          } else {
+          if (!productId) {
             const { data: newProd } = await supabase.from('products').insert({
-              name: it.description || it.name || 'Produto Extraído',
+              name: it.description || 'Produto Extraído',
               code_mv_ses: it.code || null,
               unit: it.unit || 'un',
               unit_price: it.unitPrice || 0,
               product_class: selectedClass || null
             }).select().single();
-            productId = newProd?.id || `ext-prod-${Date.now()}-${i}`;
+            productId = newProd?.id;
           }
 
-          const itemData = {
-            order_id: targetOrder.id,
-            product_id: productId,
-            order_quantity: it.quantity || 0,
-            total_value_oc: (it.quantity || 0) * (it.unitPrice || 0),
-          };
-
-          itemsToInsert.push(itemData);
-          processedItems.push({
-            ...itemData,
-            id: `new-${targetOrder.id}-${i}`,
-            orderQuantity: it.quantity || 0,
-            product: {
-              name: it.description || it.name,
-              unit: it.unit || 'un',
-              codeMVSES: it.code || '---',
-              unitPrice: it.unitPrice || 0
-            }
-          });
+          if (productId) {
+            itemsToInsert.push({
+              order_id: targetOrder.id,
+              product_id: productId,
+              order_quantity: it.quantity || 0,
+              total_value_oc: (it.quantity || 0) * (it.unitPrice || 0)
+            });
+          }
         }
 
         if (itemsToInsert.length > 0) {
           await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
           await supabase.from('order_items').insert(itemsToInsert);
         }
-
-        updatedOrders.push({
-          ...targetOrder,
-          status: OrderStatus.Triagem,
-          supplierName: supplierData.name,
-          orderNumber: supplierData.orderNumber || targetOrder.orderNumber,
-          expectedDeliveryDate: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
-          quotationNumber: identifiedQuotation,
-          items: processedItems as any,
-          totalValue: totalValue
-        });
+        
+        updatedOrders.push(targetOrder as any);
       }
 
-      setOrders((prev: PurchaseOrder[]) => {
-        const otherOrders = (prev || []).filter(o => !updatedOrders.some(uo => uo.id === o.id));
-        return [...otherOrders, ...updatedOrders];
+      setOrders((prev: any) => {
+        const others = prev.filter((o: any) => !updatedOrders.some(uo => uo.id === o.id));
+        return [...others, ...updatedOrders];
       });
 
-      alert(`Extração Concluída!\n\nDocumento: ${file.name}\nIdentificamos ${updatedOrders.length} fornecedores.`);
+      setWizardStep('upload');
+      setExtractionResult(null);
+      alert("Processamento Profissional Concluído!");
     } catch (err: any) {
-      console.error("Erro na extração:", err);
-      alert("Erro na Extração: " + (err.message || "Verifique o console"));
+      alert("Erro ao persistir: " + err.message);
     } finally {
-      setIsExtracting(null);
+      setIsExtracting(false);
     }
-  };
-
-  const freeExtract = async (file: File) => {
-    setIsExtracting('global');
-    try {
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      const fileBase64 = await base64Promise;
-
-      const response = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileBase64, fileName: file.name })
-      });
-
-      if (!response.ok) throw new Error('A API da Vercel retornou um erro.');
-      const data = await response.json();
-      
-      // We reuse the update logic here or call a shared helper if we refactored
-      // For now, I'll pass the data to a helper-like block (simulated by repeating logic or refactoring)
-      await applyExtractedData('global', file, data);
-    } catch (err: any) {
-      console.error("Erro na extração gratuita:", err);
-      alert("Erro na Extração Gratuita: " + err.message);
-    } finally {
-      setIsExtracting(null);
-    }
-  };
-
-  // Helper function to avoid code duplication
-  const applyExtractedData = async (groupKey: string, file: File, data: any) => {
-      const identifiedQuotation = data.quotationNumber || (file.name.match(/\d+/) || ["6697"])[0];
-      const groupOrders = orders.filter(o => {
-        const qNum = String(o?.quotationNumber || '').replace(/\D/g, '');
-        const idQNum = String(identifiedQuotation).replace(/\D/g, '');
-        if (groupKey === 'global') return qNum.includes(idQNum) || idQNum.includes(qNum);
-        const oKey = `${o?.quotationNumber || 'S-COT'}-${o?.mvSolicitationNumber || 'S-SOL'}`;
-        return oKey === groupKey;
-      });
-
-      const updatedOrders: PurchaseOrder[] = [];
-
-      for (const supplierData of (data.suppliers || [])) {
-        let targetOrder = groupOrders.find(o =>
-          (o.supplierName?.toUpperCase().includes(supplierData.name.toUpperCase()) ||
-           supplierData.name.toUpperCase().includes(o.supplierName?.toUpperCase() || '')) ||
-          (o.cnpj && supplierData.cnpj && o.cnpj.replace(/\D/g, '') === supplierData.cnpj.replace(/\D/g, ''))
-        ) || groupOrders[0];
-
-        const totalValue = supplierData.totalValue || (supplierData.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 0) * (it.unitPrice || 0), 0);
-
-        if (!targetOrder) {
-          const { data: newOrderData, error: insertError } = await supabase.from('purchase_orders').insert({
-            supplier_name: supplierData.name,
-            cnpj: supplierData.cnpj || null,
-            order_number: supplierData.orderNumber,
-            expected_delivery_date: supplierData.deliveryDeadline,
-            quotation_number: identifiedQuotation,
-            status: OrderStatus.Triagem,
-            total_value: totalValue,
-            product_class: selectedClass || null
-          }).select().single();
-
-          if (insertError) continue;
-          targetOrder = newOrderData as PurchaseOrder;
-        } else {
-          await supabase.from('purchase_orders').update({
-            supplier_name: supplierData.name,
-            cnpj: supplierData.cnpj || targetOrder.cnpj,
-            order_number: supplierData.orderNumber || targetOrder.orderNumber,
-            expected_delivery_date: supplierData.deliveryDeadline || targetOrder.expectedDeliveryDate,
-            quotation_number: identifiedQuotation,
-            total_value: totalValue
-          }).eq('id', targetOrder.id);
-        }
-
-        const itemsToInsert = [];
-        const processedItems = [];
-
-        for (const [i, it] of (supplierData.items || []).entries()) {
-          let productId;
-          const { data: existingProd } = await supabase.from('products').select('id').or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`).maybeSingle();
-          if (existingProd) {
-            productId = existingProd.id;
-          } else {
-            const { data: newProd } = await supabase.from('products').insert({ name: it.description || 'Produto Extraído', code_mv_ses: it.code || null, unit: it.unit || 'un', unit_price: it.unitPrice || 0, product_class: selectedClass || null }).select().single();
-            productId = newProd?.id || `ext-prod-${Date.now()}-${i}`;
-          }
-
-          const itemData = { order_id: targetOrder.id, product_id: productId, order_quantity: it.quantity || 0, total_value_oc: (it.quantity || 0) * (it.unitPrice || 0) };
-          itemsToInsert.push(itemData);
-          processedItems.push({ ...itemData, id: `new-${targetOrder.id}-${i}`, orderQuantity: it.quantity || 0, product: { name: it.description || 'Produto', unit: it.unit || 'un', codeMVSES: it.code || '---', unitPrice: it.unitPrice || 0 }});
-        }
-
-        if (itemsToInsert.length > 0) {
-          await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
-          await supabase.from('order_items').insert(itemsToInsert);
-        }
-
-        updatedOrders.push({ ...targetOrder, supplierName: supplierData.name, quotationNumber: identifiedQuotation, items: processedItems as any, totalValue: totalValue });
-      }
-
-      setOrders((prev: PurchaseOrder[]) => {
-        const otherOrders = (prev || []).filter(o => !updatedOrders.some(uo => uo.id === o.id));
-        return [...otherOrders, ...updatedOrders];
-      });
-      alert(`SVA Econômico: Extração Concluída!\n\nIdentificamos ${updatedOrders.length} fornecedores.`);
   };
 
   return (
     <div className="space-y-10 animate-in fade-in pb-20">
       {/* HEADER DINÂMICO */}
-      {selectedClass ? (
-        <div className="flex justify-between items-center bg-white dark:bg-[#0f2626] p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-          <button onClick={() => setSelectedClass(null)} className="text-primary dark:text-blue-400 font-black flex items-center gap-3 uppercase text-xs tracking-[0.2em] hover:opacity-70">
-            <span className="material-symbols-outlined">arrow_back</span> Voltar
-          </button>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic">{selectedClass}</h2>
-          <div className="bg-blue-50 dark:bg-blue-900/20 px-5 py-2 rounded-xl text-primary dark:text-blue-400 text-[10px] font-black uppercase tracking-widest">Pasta Ativa</div>
+      <div className="flex justify-between items-center bg-white dark:bg-[#0f2626] p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex items-center gap-6">
+          {selectedClass && (
+            <button onClick={() => { setSelectedClass(null); setWizardStep('upload'); }} className="text-primary dark:text-blue-400 font-black flex items-center gap-3 uppercase text-xs tracking-[0.2em] hover:opacity-70">
+              <span className="material-symbols-outlined">arrow_back</span> Voltar
+            </button>
+          )}
+          <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic">
+            {selectedClass ? selectedClass : 'Triagem de Suprimentos'}
+          </h2>
         </div>
-      ) : (
-        <h2 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-widest italic">Triagem de Suprimentos</h2>
-      )}
-
-      {/* ÁREA DE UPLOAD GLOBAL - SEMPRE VISÍVEL */}
-      <div className="bg-white dark:bg-[#0f2626] p-8 rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 shadow-xl overflow-hidden mb-10">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-4">
-          <div className="flex items-center gap-5">
-            <div className="w-14 h-14 bg-primary/10 dark:bg-blue-500/10 text-primary dark:text-blue-400 rounded-2xl flex items-center justify-center">
-              <span className="material-symbols-outlined text-3xl font-black">cloud_upload</span>
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tighter">Iniciar Nova Triagem</h3>
-              <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Selecione o PDF da OC ou Relatório de Fornecedor</p>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            {/* Botão SVA IA */}
-            <label className={`cursor-pointer px-8 py-5 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-3 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-slate-900 text-white hover:bg-black shadow-xl shadow-slate-900/20 active:scale-95'}`}>
-              <span className="material-symbols-outlined text-2xl">psychology</span>
-              SVA IA (OpenAI)
-              <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) realExtract('global', file);
-              }} disabled={!!isExtracting} />
-            </label>
-
-            {/* Botão SVA GRÁTIS */}
-            <label className={`cursor-pointer px-8 py-5 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-3 ${isExtracting ? 'bg-slate-200 text-slate-400 cursor-wait' : 'bg-primary text-white hover:bg-primary/90 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95'}`}>
-              <span className="material-symbols-outlined text-2xl">auto_awesome</span>
-              SVA Econômico (Grátis)
-              <input type="file" className="hidden" accept=".pdf" onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) freeExtract(file);
-              }} disabled={!!isExtracting} />
-            </label>
-          </div>
-        </div>
+        {selectedClass && <div className="bg-blue-50 dark:bg-blue-900/20 px-5 py-2 rounded-xl text-primary dark:text-blue-400 text-[10px] font-black uppercase tracking-widest">Painel de Importação</div>}
       </div>
 
-      {!selectedClass ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {PRODUCT_CLASSES.map(cls => (
-            <div key={cls} onClick={() => setSelectedClass(cls)} className="bg-white dark:bg-[#0f2626] p-10 rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 hover:border-primary dark:hover:border-blue-500 cursor-pointer transition-all shadow-xl group">
-              <div className="w-16 h-16 bg-primary/10 dark:bg-blue-500/10 text-primary dark:text-blue-400 rounded-3xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                <span className="material-symbols-outlined text-4xl">{CLASS_ICONS[cls] || 'folder'}</span>
+      {wizardStep === 'verify' && extractionResult ? (
+        <div className="space-y-10 animate-in slide-in-from-top-10">
+          <div className="bg-primary/5 dark:bg-blue-900/10 border-2 border-primary/20 dark:border-blue-500/20 p-8 rounded-[3rem] flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 bg-primary text-white rounded-2xl flex items-center justify-center">
+                <span className="material-symbols-outlined text-3xl">fact_check</span>
               </div>
-              <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-widest italic">{cls}</h3>
-              <div className="mt-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                {triagemOrders.filter(o => o?.productClass === cls).length} Pendentes
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase">Revisão de Extração</h3>
+                <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Confirme os dados identificados pela IA antes de salvar</p>
               </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-16">
-          {/* UPLOAD CARD ESPECÍFICO DA PASTA */}
-          <div className="bg-slate-50/50 dark:bg-slate-900/20 p-8 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800">
-            <h4 className="text-xs font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-6 text-center">Adicionar documentos para {selectedClass}</h4>
-            <FolderUploadCard groupKey="global" onExtract={(file) => realExtract('global', file)} isExtracting={isExtracting === 'global'} />
+            <div className="flex gap-4">
+              <button onClick={() => setWizardStep('upload')} className="px-8 py-4 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-black uppercase text-[10px] border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition-all">Cancelar</button>
+              <button onClick={persistVerification} className="px-10 py-4 bg-success text-white rounded-2xl font-black uppercase text-[10px] shadow-xl shadow-success/20 hover:scale-105 transition-all flex items-center gap-3">
+                <span className="material-symbols-outlined">verified</span> Confirmar e Importar
+              </button>
+            </div>
           </div>
 
-          {groups.map(([key, groupOrders]) => (
-            <div key={key} className="bg-white dark:bg-[#0f2626] p-10 rounded-[4rem] border-2 border-slate-50 dark:border-slate-800 shadow-2xl space-y-10">
-              <div className="flex flex-col lg:flex-row lg:items-center gap-10 pb-10 border-b border-slate-100 dark:border-slate-800 relative">
-                <div className="flex items-center gap-5 flex-1">
-                  <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center shadow-2xl">
-                    <span className="material-symbols-outlined text-3xl">folder_zip</span>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-1">Cotação / Processo</div>
-                    <div className="flex items-baseline gap-4">
-                      <div className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">#{groupOrders?.[0]?.quotationNumber || key.split('-')[0]}</div>
-                      <div className="text-[11px] font-black text-primary dark:text-blue-400 uppercase tracking-widest bg-primary/5 dark:bg-blue-900/10 px-3 py-1 rounded-lg">Pendente de Leitura</div>
-                    </div>
-                  </div>
+          <div className="grid gap-12">
+            {(extractionResult.suppliers || []).map((s: any, idx: number) => (
+              <SupplierTriageCard key={`ext-${idx}`} order={s as any} onConfirm={() => {}} onDecline={() => {
+                const newRes = {...extractionResult};
+                newRes.suppliers.splice(idx, 1);
+                setExtractionResult(newRes);
+              }} isNew={true} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* ÁREA DE UPLOAD PROFISSIONAL */}
+          <div className="bg-white dark:bg-[#0f2626] p-10 rounded-[3.5rem] border-2 border-slate-100 dark:border-slate-800 shadow-2xl relative overflow-hidden group">
+            {isExtracting && (
+              <div className="absolute inset-0 bg-white/80 dark:bg-[#0f2626]/90 backdrop-blur-sm z-30 flex flex-col items-center justify-center space-y-6 animate-in fade-in">
+                <div className="w-20 h-20 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <div className="text-center">
+                  <h4 className="text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tighter animate-pulse">{extractionProgress}</h4>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">Tecnologia SVA IA em operação</p>
                 </div>
               </div>
+            )}
+            
+            <div className="flex flex-col lg:flex-row items-center gap-12">
+              <div className="lg:w-1/3 space-y-6">
+                <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-4xl">rocket_launch</span>
+                </div>
+                <h3 className="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic leading-none">Importação Inteligente</h3>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Arraste seu PDF de cotação. Nossa IA irá separar automaticamente os fornecedores e itens para sua revisão.</p>
+              </div>
 
-              <div className="grid gap-12">
-                <FolderUploadCard groupKey={key} onExtract={(file) => realExtract(key, file)} isExtracting={isExtracting === key} />
-                {(groupOrders || []).map((o, idx) => (
-                  <SupplierTriageCard
-                    key={o?.id || `card-${idx}`}
-                    order={o}
-                    onConfirm={async (id: string, data: any) => {
-                      const { error } = await supabase.from('purchase_orders').update({
-                        status: OrderStatus.AguardandoEntrega,
-                        supplier_name: data.supplierName,
-                        cnpj: data.cnpj,
-                        order_number: data.orderNumber,
-                        expected_delivery_date: data.expectedDeliveryDate
-                      }).eq('id', id);
-                      if (error) alert("Erro na triagem: " + error.message);
-                    }}
-                    onDecline={async (id: string) => {
-                      const { error } = await supabase.from('purchase_orders').update({
-                        status: OrderStatus.Declinado
-                      }).eq('id', id);
-                      if (error) alert("Erro ao declinar pedido: " + error.message);
-                    }}
-                  />
-                ))}
+              <div className="flex-1 w-full">
+                <label className="block w-full h-64 border-4 border-dashed border-slate-100 dark:border-slate-800 rounded-[3rem] hover:border-primary dark:hover:border-blue-500 transition-all cursor-pointer bg-slate-50/50 dark:bg-slate-900/20 relative group/dash">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
+                    <span className="material-symbols-outlined text-6xl text-slate-200 dark:text-slate-700 group-hover/dash:text-primary transition-colors">upload_file</span>
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">PDF, JPG ou PNG (Máx 10MB)</span>
+                  </div>
+                  <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) professionalExtract(file);
+                  }} disabled={isExtracting} />
+                </label>
               </div>
             </div>
-          ))}
+          </div>
 
-          {groups.length === 0 && !isExtracting && (
-            <div className="p-32 text-center space-y-8 bg-white dark:bg-[#0f2626] rounded-[4rem] border-4 border-dashed border-slate-100 dark:border-slate-800 shadow-inner">
-              <div className="w-24 h-24 bg-slate-50 dark:bg-slate-900 text-slate-100 dark:text-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
-                <span className="material-symbols-outlined text-6xl">cloud_off</span>
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-2xl font-black text-slate-300 dark:text-slate-700 uppercase italic tracking-tighter">Nenhuma cotação pendente</h3>
-                <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest max-w-sm mx-auto">Use o botão acima para subir o PDF do fornecedor e iniciar o processo de entrada.</p>
-              </div>
+          {!selectedClass ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-12">
+              {PRODUCT_CLASSES.map(cls => (
+                <div key={cls} onClick={() => setSelectedClass(cls)} className="bg-white dark:bg-[#0f2626] p-10 rounded-[3rem] border-2 border-slate-100 dark:border-slate-800 hover:border-primary dark:hover:border-blue-500 cursor-pointer transition-all shadow-xl group">
+                  <div className="w-16 h-16 bg-primary/10 dark:bg-blue-500/10 text-primary dark:text-blue-400 rounded-3xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <span className="material-symbols-outlined text-4xl">{CLASS_ICONS[cls] || 'folder'}</span>
+                  </div>
+                  <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-widest italic">{cls}</h3>
+                  <div className="mt-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                    {triagemOrders.filter(o => o?.productClass === cls).length} Pendentes
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-16 mt-12">
+              {groups.map(([key, groupOrders]) => (
+                <div key={key} className="bg-white dark:bg-[#0f2626] p-10 rounded-[4rem] border-2 border-slate-50 dark:border-slate-800 shadow-2xl space-y-10 animate-in fade-in">
+                  <div className="flex flex-col lg:flex-row lg:items-center gap-10 pb-10 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-5 flex-1">
+                      <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center shadow-2xl">
+                        <span className="material-symbols-outlined text-3xl">folder_zip</span>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-1">Cotação / Processo</div>
+                        <div className="flex items-baseline gap-4">
+                          <div className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">#{groupOrders?.[0]?.quotationNumber || key.split('-')[0]}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-12">
+                    {(groupOrders || []).map((o, idx) => (
+                      <SupplierTriageCard
+                        key={o?.id || `card-${idx}`}
+                        order={o}
+                        onConfirm={async (id: string, data: any) => {
+                          const { error } = await supabase.from('purchase_orders').update({
+                            status: OrderStatus.AguardandoEntrega,
+                            supplier_name: data.supplierName,
+                            cnpj: data.cnpj,
+                            order_number: data.orderNumber,
+                            expected_delivery_date: data.expectedDeliveryDate
+                          }).eq('id', id);
+                          if (error) alert("Erro na triagem: " + error.message);
+                        }}
+                        onDecline={async (id: string) => {
+                          const { error } = await supabase.from('purchase_orders').update({ status: OrderStatus.Declinado }).eq('id', id);
+                          if (error) alert("Erro ao declinar pedido: " + error.message);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {groups.length === 0 && (
+                <div className="p-32 text-center space-y-8 bg-white dark:bg-[#0f2626] rounded-[4rem] border-4 border-dashed border-slate-100 dark:border-slate-800 shadow-inner">
+                  <div className="w-24 h-24 bg-slate-50 dark:bg-slate-900 text-slate-100 dark:text-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <span className="material-symbols-outlined text-6xl">cloud_off</span>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-black text-slate-300 dark:text-slate-700 uppercase italic tracking-tighter">Nenhuma cotação nesta pasta</h3>
+                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest max-w-sm mx-auto">Use a área de importação acima para carregar novos arquivos.</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );
