@@ -208,6 +208,7 @@ const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, is
 
 const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ orders = [], setOrders }) => {
   const [selectedClass, setSelectedClass] = useState<ProductClass | null>(null);
+  const [extractionMode, setExtractionMode] = useState<'ai' | 'local'>('local');
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionProgress, setExtractionProgress] = useState<string>('');
   const [extractionResult, setExtractionResult] = useState<any | null>(null);
@@ -229,67 +230,77 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     return Array.from(map.entries());
   }, [triagemOrders, selectedClass]);
 
-  const professionalExtract = async (file: File) => {
+  const localExtract = async (file: File) => {
     setIsExtracting(true);
     setWizardStep('upload');
-    setExtractionProgress('Iniciando digitalização do documento...');
+    setExtractionProgress('Extração Local: Digitalizando...');
     try {
-      let images: string[] = [];
+      const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
+      GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(await import('pdfjs-dist/package.json')).version}/build/pdf.worker.min.mjs`;
 
-      if (file.type === 'application/pdf') {
-        const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
-        GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(await import('pdfjs-dist/package.json')).version}/build/pdf.worker.min.mjs`;
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
 
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await getDocument({ data: arrayBuffer }).promise;
+      for (let i = 1; i <= pdf.numPages; i++) {
+        setExtractionProgress(`Lendo página ${i} de ${pdf.numPages}...`);
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map((item: any) => item.str).join(' ') + "\n";
+      }
+
+      setExtractionProgress('Processando regras locais...');
+      
+      const result: any = {
+        quotationNumber: (fullText.match(/Cotação[: ]*(\d+)/i) || fullText.match(/#(\d+)/) || [null, (file.name.match(/\d+/) || ["0000"])[0]])[1],
+        suppliers: []
+      };
+
+      const sections = fullText.split(/Fornecedor[: ]*/i);
+      for (let i = 1; i < sections.length; i++) {
+        const section = sections[i];
+        const supplierName = section.split('\n')[0].trim().split('  ')[0];
         
-        for (let i = 1; i <= pdf.numPages; i++) {
-          setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 2.0 });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
+        const supplierData: any = {
+          name: supplierName,
+          cnpj: (section.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          orderNumber: (section.match(/OC[: ]*(\d+)/i) || ["", ""])[1],
+          deliveryDeadline: (section.match(/(\d+)\s*dias/i) || ["", "5"])[1],
+          items: []
+        };
 
-          if (context) {
-            await page.render({ canvasContext: context, viewport, canvas }).promise;
-            images.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
-          }
+        const itemRegex = /(?:(\d+)\s+)?(.+?)\s+(\d+(?:\.\d+)?)\s+(UN|CX|PC|FR|KG|ML)\s+([\d,.]+)\s+([\d,.]+)/gi;
+        let match;
+        while ((match = itemRegex.exec(section)) !== null) {
+          supplierData.items.push({
+            code: match[1] || "---",
+            description: match[2].trim(),
+            quantity: parseFloat(match[3].replace(',', '.')),
+            unitPrice: parseFloat(match[5].replace('.', '').replace(',', '.')),
+            unit: match[4]
+          });
         }
-      } else {
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve((reader.result as string).split(',')[1]);
-          reader.onerror = reject;
-        });
-        reader.readAsDataURL(file);
-        images.push(await base64Promise);
+        if (supplierData.name || supplierData.items.length > 0) result.suppliers.push(supplierData);
       }
 
-      setExtractionProgress('SVA IA: Identificando fornecedores e itens...');
-      const { data, error } = await supabase.functions.invoke('parse-report', {
-        body: { images, fileName: file.name }
-      });
+      if (result.suppliers.length === 0) throw new Error("Não foi possível identificar fornecedores com as regras locais. Tente a Extração por IA Avançada.");
 
-      if (error) throw new Error(`Erro na conexão com SVA IA: ${error.message}`);
-      
-      if (data.error === "OPENAI_QUOTA_EXCEEDED") {
-          throw new Error("SALDO INSUFICIENTE NO SVA (OpenAI). Por favor, verifique seu painel de faturamento da OpenAI ou adicione créditos ($5) para continuar.");
-      }
-      
-      if (data.error || !data.suppliers) {
-          throw new Error(data.message || data.error || 'Falha na resposta da IA');
-      }
-
-      setExtractionResult(data);
+      setExtractionResult(result);
       setWizardStep('verify');
     } catch (err: any) {
-      console.error("Erro na extração:", err);
-      alert("Erro na Extração: " + (err.message || "Verifique o console"));
+      console.error("Erro na extração local:", err);
+      alert("Erro na Extração Local: " + (err.message || "Formato incompatível"));
     } finally {
       setIsExtracting(false);
       setExtractionProgress('');
+    }
+  };
+
+  const handleExtract = (file: File) => {
+    if (extractionMode === 'ai') {
+      professionalExtract(file);
+    } else {
+      localExtract(file);
     }
   };
 
@@ -447,25 +458,43 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             )}
             
             <div className="flex flex-col lg:flex-row items-center gap-12">
-              <div className="lg:w-1/3 space-y-6">
-                <div className="w-16 h-16 bg-slate-900 dark:bg-black text-white rounded-[1.5rem] flex items-center justify-center">
-                  <span className="material-symbols-outlined text-4xl">rocket_launch</span>
+              <div className="lg:w-1/3 space-y-8">
+                <div>
+                  <h3 className="text-3xl font-black text-slate-800 dark:text-white uppercase tracking-tighter italic leading-none">Importação Inteligente</h3>
+                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest mt-2">Escolha o método de processamento</p>
                 </div>
-                <h3 className="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic leading-none">Importação Inteligente</h3>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Arraste seu PDF de cotação. Nossa IA irá separar automaticamente os fornecedores e itens para sua revisão.</p>
+
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-[2rem]">
+                  <button 
+                    onClick={() => setExtractionMode('local')}
+                    className={`flex flex-col items-center gap-2 py-6 rounded-[1.5rem] transition-all ${extractionMode === 'local' ? 'bg-white dark:bg-[#0f2626] shadow-xl text-primary dark:text-blue-400 ring-2 ring-primary/10' : 'text-slate-400 opacity-60 hover:opacity-100'}`}
+                  >
+                    <span className="material-symbols-outlined text-3xl">terminal</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest">IA Local (Grátis)</span>
+                  </button>
+                  <button 
+                    onClick={() => setExtractionMode('ai')}
+                    className={`flex flex-col items-center gap-2 py-6 rounded-[1.5rem] transition-all ${extractionMode === 'ai' ? 'bg-white dark:bg-[#0f2626] shadow-xl text-primary dark:text-blue-400 ring-2 ring-primary/10' : 'text-slate-400 opacity-60 hover:opacity-100'}`}
+                  >
+                    <span className="material-symbols-outlined text-3xl">psychology</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest">IA Avançada (Créditos)</span>
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 text-slate-500">
+                    <span className="material-symbols-outlined text-xl">verified</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Leitura de Ordem de Compra</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-slate-500">
+                    <span className="material-symbols-outlined text-xl">verified</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Vinculação de Fornecedores</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex-1 w-full">
-                <label className="block w-full h-64 border-4 border-dashed border-slate-100 dark:border-slate-800 rounded-[3rem] hover:border-primary dark:hover:border-blue-500 transition-all cursor-pointer bg-slate-50/50 dark:bg-slate-900/20 relative group/dash">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
-                    <span className="material-symbols-outlined text-6xl text-slate-200 dark:text-slate-700 group-hover/dash:text-primary transition-colors">upload_file</span>
-                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">PDF, JPG ou PNG (Máx 10MB)</span>
-                  </div>
-                  <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) professionalExtract(file);
-                  }} disabled={isExtracting} />
-                </label>
+              <div className="lg:w-2/3 w-full">
+                <FolderUploadCard groupKey="global" onExtract={handleExtract} isExtracting={isExtracting} />
               </div>
             </div>
           </div>
