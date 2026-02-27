@@ -246,7 +246,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         setExtractionProgress(`Lendo página ${i} de ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        fullText += textContent.items.map((item: any) => item.str).join(' ') + "\n";
+        fullText += textContent.items.map((item: any) => (item as any).str).join(' ') + "\n";
       }
 
       setExtractionProgress('Processando regras locais...');
@@ -290,6 +290,70 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     } catch (err: any) {
       console.error("Erro na extração local:", err);
       alert("Erro na Extração Local: " + (err.message || "Formato incompatível"));
+    } finally {
+      setIsExtracting(false);
+      setExtractionProgress('');
+    }
+  };
+
+  const professionalExtract = async (file: File) => {
+    setIsExtracting(true);
+    setWizardStep('upload');
+    setExtractionProgress('Iniciando digitalização do documento...');
+    try {
+      let images: string[] = [];
+
+      if (file.type === 'application/pdf') {
+        const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
+        GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(await import('pdfjs-dist/package.json')).version}/build/pdf.worker.min.mjs`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await getDocument({ data: arrayBuffer }).promise;
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2.0 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          if (context) {
+            await page.render({ canvasContext: context, viewport, canvas }).promise;
+            images.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+          }
+        }
+      } else {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(file);
+        images.push(await base64Promise);
+      }
+
+      setExtractionProgress('SVA IA: Identificando fornecedores e itens...');
+      const { data, error } = await supabase.functions.invoke('parse-report', {
+        body: { images, fileName: file.name }
+      });
+
+      if (error) throw new Error(`Erro na conexão com SVA IA: ${error.message}`);
+      
+      if (data.error === "OPENAI_QUOTA_EXCEEDED") {
+          throw new Error("SALDO INSUFICIENTE NO SVA (OpenAI). Por favor, verifique seu painel de faturamento da OpenAI ou adicione créditos ($5) para continuar.");
+      }
+      
+      if (data.error || !data.suppliers) {
+          throw new Error(data.message || data.error || 'Falha na resposta da IA');
+      }
+
+      setExtractionResult(data);
+      setWizardStep('verify');
+    } catch (err: any) {
+      console.error("Erro na extração:", err);
+      alert("Erro na Extração: " + (err.message || "Verifique o console"));
     } finally {
       setIsExtracting(false);
       setExtractionProgress('');
