@@ -246,50 +246,86 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         setExtractionProgress(`Lendo página ${i} de ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
+        // Improve text reconstruction by preserving horizontal alignment hints
         fullText += textContent.items.map((item: any) => (item as any).str).join(' ') + "\n";
       }
 
       setExtractionProgress('Processando regras locais...');
       
+      const normalizedText = fullText.replace(/\s+/g, ' ');
+      
       const result: any = {
-        quotationNumber: (fullText.match(/Cotação[: ]*(\d+)/i) || fullText.match(/#(\d+)/) || [null, (file.name.match(/\d+/) || ["0000"])[0]])[1],
+        quotationNumber: (normalizedText.match(/Cotação[: ]*(\d+)/i) || normalizedText.match(/#(\d+)/) || [null, (file.name.match(/\d+/) || ["0000"])[0]])[1],
         suppliers: []
       };
 
+      // Identify supplier sections
       const sections = fullText.split(/Fornecedor[: ]*/i);
       for (let i = 1; i < sections.length; i++) {
         const section = sections[i];
-        const supplierName = section.split('\n')[0].trim().split('  ')[0];
+        const sectionOneLine = section.replace(/\s+/g, ' ');
+        
+        // Extract Name (usually the first line or right after "Fornecedor: ")
+        const firstLine = section.split('\n')[0].trim();
+        const supplierName = firstLine.split('  ')[0].replace(/(CNPJ|OC|ENTREGA).*/i, '').trim();
         
         const supplierData: any = {
-          name: supplierName,
-          cnpj: (section.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
-          orderNumber: (section.match(/OC[: ]*(\d+)/i) || ["", ""])[1],
-          deliveryDeadline: (section.match(/(\d+)\s*dias/i) || ["", "5"])[1],
+          name: supplierName || "Fornecedor Identificado",
+          cnpj: (sectionOneLine.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          orderNumber: (sectionOneLine.match(/OC[: ]*(\d+)/i) || sectionOneLine.match(/Ordem de Compra[: ]*(\d+)/i) || ["", ""])[1],
+          deliveryDeadline: (sectionOneLine.match(/(\d+)\s*dias/i) || sectionOneLine.match(/Entrega[: ]*([^\s]+)/i) || ["", "5"])[1],
           items: []
         };
 
-        const itemRegex = /(?:(\d+)\s+)?(.+?)\s+(\d+(?:\.\d+)?)\s+(UN|CX|PC|FR|KG|ML)\s+([\d,.]+)\s+([\d,.]+)/gi;
-        let match;
-        while ((match = itemRegex.exec(section)) !== null) {
-          supplierData.items.push({
-            code: match[1] || "---",
-            description: match[2].trim(),
-            quantity: parseFloat(match[3].replace(',', '.')),
-            unitPrice: parseFloat(match[5].replace('.', '').replace(',', '.')),
-            unit: match[4]
-          });
+        // Item extraction - Look for patterns like: [Code] [Description] [Qty] [Unit] [Price] [Total]
+        // Often found in lines after a header or keyword "Item"
+        const lines = section.split('\n');
+        for (const line of lines) {
+            // Regex to find: Code (opt), Description, Qty, Unit, UnitPrice, TotalPrice
+            // We search for lines that have a quantity, a known unit, and price-like numbers
+            const unitMatch = line.match(/\b(UN|CX|PC|FR|KG|ML|PCT|LT|GL)\b/i);
+            const pricesMatch = line.match(/(\d+[,.]\d{2})/g); // Finds "10,50" or "10.50"
+            
+            if (unitMatch && pricesMatch && pricesMatch.length >= 1) {
+                const parts = line.trim().split(/\s+/);
+                // Try to find the quantity (usually before the unit)
+                const unitIndex = parts.findIndex(p => p.toUpperCase() === unitMatch[0].toUpperCase());
+                if (unitIndex > 0) {
+                    const qty = parseFloat(parts[unitIndex - 1].replace(',', '.'));
+                    if (!isNaN(qty)) {
+                        // Description is everything before the quantity
+                        const description = parts.slice(0, unitIndex - 1).join(' ').replace(/^\d+\s+/, '');
+                        const code = line.match(/^\s*(\d{4,10})\b/)?.[1] || "---";
+                        
+                        // Price is usually the last or second to last
+                        const unitPrice = parseFloat(pricesMatch[pricesMatch.length - (pricesMatch.length > 1 ? 2 : 1)].replace(',', '.'));
+                        
+                        if (description.length > 3) {
+                            supplierData.items.push({
+                                code: code,
+                                description: description,
+                                quantity: qty,
+                                unitPrice: unitPrice,
+                                unit: unitMatch[0].toUpperCase()
+                            });
+                        }
+                    }
+                }
+            }
         }
-        if (supplierData.name || supplierData.items.length > 0) result.suppliers.push(supplierData);
+
+        if (supplierData.name !== "Fornecedor Identificado" || supplierData.items.length > 0) {
+            result.suppliers.push(supplierData);
+        }
       }
 
-      if (result.suppliers.length === 0) throw new Error("Não foi possível identificar fornecedores com as regras locais. Tente a Extração por IA Avançada.");
+      if (result.suppliers.length === 0) throw new Error("Não foi possível identificar dados. O PDF pode estar protegido ou em um formato não suportado pela extração local.");
 
       setExtractionResult(result);
       setWizardStep('verify');
     } catch (err: any) {
       console.error("Erro na extração local:", err);
-      alert("Erro na Extração Local: " + (err.message || "Formato incompatível"));
+      alert("Falha na Extração Local: " + (err.message || "Tente o método IA Avançada nos créditos."));
     } finally {
       setIsExtracting(false);
       setExtractionProgress('');
