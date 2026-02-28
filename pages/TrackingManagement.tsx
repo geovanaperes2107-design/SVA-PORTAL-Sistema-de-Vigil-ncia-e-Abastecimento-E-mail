@@ -240,74 +240,102 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await getDocument({ data: arrayBuffer }).promise;
-      let fullText = "";
+      
+      let allLines: string[] = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
-        setExtractionProgress(`Lendo página ${i} de ${pdf.numPages}...`);
+        setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        // Maintain a semantic structure by joining items with spaces, but keep lines distinct
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + "\n";
+        
+        // Group items by Y coordinate (transform[5])
+        const items = textContent.items as any[];
+        const linesMap: { [y: number]: any[] } = {};
+        
+        items.forEach(item => {
+          const y = Math.round(item.transform[5]);
+          if (!linesMap[y]) linesMap[y] = [];
+          linesMap[y].push(item);
+        });
+
+        // Sort Y coordinates descending (top to bottom)
+        const sortedYs = Object.keys(linesMap).map(Number).sort((a, b) => b - a);
+        
+        sortedYs.forEach(y => {
+          // Sort items on the same line by X coordinate (transform[4])
+          const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
+          const lineText = lineItems.map(item => item.str).join(' ');
+          if (lineText.trim()) allLines.push(lineText);
+        });
+        
+        allLines.push("---PAGE_BREAK---");
       }
 
       setExtractionProgress('SVA LOCAL: Analisando Estrutura...');
+      const fullText = allLines.join('\n');
       
       const result: any = {
         quotationNumber: (fullText.match(/Cotação[: ]*(\d+)/i) || fullText.match(/#(\d+)/) || [null, (file.name.match(/\d+/) || ["0000"])[0]])[1],
         suppliers: []
       };
 
-      // Identify supplier sections using "FORNECEDOR" as the main anchor
-      const sections = fullText.split(/FORNECEDOR[: ]*/i);
+      // Split by Supplier - Identifying blocks
+      const supplierBlocks: string[] = [];
+      let currentBlock: string[] = [];
       
-      for (let i = 1; i < sections.length; i++) {
-        const section = sections[i];
-        const sectionLines = section.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        
-        if (sectionLines.length === 0) continue;
+      allLines.forEach(line => {
+          if (line.match(/FORNECEDOR|EMPRESA/i) && !line.match(/Dados do Fornecedor/i)) {
+              if (currentBlock.length > 0) supplierBlocks.push(currentBlock.join('\n'));
+              currentBlock = [line];
+          } else {
+              currentBlock.push(line);
+          }
+      });
+      if (currentBlock.length > 0) supplierBlocks.push(currentBlock.join('\n'));
 
-        // The supplier name is usually the very first part of the section
-        const supplierNameRaw = sectionLines[0].split('  ')[0];
-        const supplierName = supplierNameRaw.replace(/(CNPJ|OC|ENTREGA|VALOR|ITEM).*/gi, '').trim();
+      for (const block of supplierBlocks) {
+        const blockLines = block.split('\n');
+        const header = blockLines[0];
+        
+        // Extract Name from header or next line
+        let name = header.replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
+        if (!name || name.length < 3) name = blockLines[1]?.split('  ')[0].trim();
 
         const supplierData: any = {
-          name: supplierName || "Fornecedor Identificado",
-          cnpj: (section.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
-          orderNumber: (section.match(/OC[: ]*(\d+)/i) || section.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
-          deliveryDeadline: (section.match(/(\d+)\s*dias/i) || section.match(/Entrega[: ]*([\d/]+)/i) || ["", "---"])[1],
+          name: name || "Fornecedor Identificado",
+          cnpj: (block.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          orderNumber: (block.match(/OC[: ]*(\d+)/i) || block.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
+          deliveryDeadline: (block.match(/(\d+)\s*dias/i) || block.match(/Entrega[: ]*([\d/]+)/i) || ["", "---"])[1],
           totalValue: 0,
           items: []
         };
 
-        // Deep Item Extraction Strategy
-        // We look for units (UN, CX, PC, etc.) as anchors for each item row
-        const units = ["UN", "CX", "PC", "FR", "KG", "ML", "PCT", "LT", "GL", "DZ"];
-        const itemRows = section.split('\n');
+        const units = ["UN", "CX", "PC", "FR", "KG", "ML", "PCT", "LT", "GL", "DZ", "PAR", "ENV", "AMP", "BIS", "GAL"];
         
-        for (const row of itemRows) {
-          const words = row.trim().split(/\s+/);
+        for (const line of blockLines) {
+          const words = line.trim().split(/\s+/);
+          // Look for units as row indicators
           const unitIdx = words.findIndex(w => units.includes(w.toUpperCase()));
           
           if (unitIdx !== -1) {
             const unit = words[unitIdx].toUpperCase();
             
-            // Quantity is almost always the word exactly before the unit
+            // Pattern: [Description...] [Qty] [Unit] [Price] [Total]
+            // Qty is before Unit
             const qtyStr = words[unitIdx - 1]?.replace('.', '').replace(',', '.');
             const quantity = parseFloat(qtyStr);
             
-            // Price and Total are usually words after the unit
-            // We search for currency-like numbers (e.g., 10,50)
-            const prices = row.match(/(\d+[,.]\d{2})/g);
+            // Price is usually after Unit
+            const prices = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/g) || line.match(/(\d+[.,]\d{2})/g);
             
             if (!isNaN(quantity) && prices && prices.length >= 1) {
-              const unitPrice = parseFloat(prices[prices.length - (prices.length > 1 ? 2 : 1)].replace('.', '').replace(',', '.'));
+              const unitPriceStr = prices[prices.length - (prices.length > 1 ? 2 : 1)].replace('.', '').replace(',', '.');
+              const unitPrice = parseFloat(unitPriceStr);
               
-              // Description is everything before the quantity
-              const description = words.slice(0, unitIdx - 1).join(' ').replace(/^\d+\s+/, '').trim();
-              const code = row.match(/^\s*(\d{4,12})\b/)?.[1] || "---";
+              const description = words.slice(0, unitIdx - 1).join(' ').replace(/^\d{4,}\s+/, '').trim();
+              const code = line.match(/^\s*(\d{4,12})\b/)?.[1] || "---";
 
-              if (description.length > 2) {
+              if (description.length > 2 && !isNaN(unitPrice)) {
                 supplierData.items.push({
                   code: code,
                   description: description,
@@ -322,20 +350,20 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           }
         }
 
-        if (supplierData.items.length > 0 || supplierData.cnpj) {
+        if (supplierData.items.length > 0 || (supplierData.cnpj && supplierData.name !== "Fornecedor Identificado")) {
           result.suppliers.push(supplierData);
         }
       }
 
       if (result.suppliers.length === 0) {
-          throw new Error("Não conseguimos ler os dados automaticamente. O PDF pode ser uma imagem (digitalizado) ou ter um formato incompatível com a extração local.");
+        throw new Error("Não foi possível detectar fornecedores e itens. Verifique se o PDF tem texto selecionável ou use a Extração de IA.");
       }
 
       setExtractionResult(result);
       setWizardStep('verify');
     } catch (err: any) {
       console.error("Erro na extração local:", err);
-      alert("Falha na Extração Local: " + (err.message || "Tente usar a Extração Avançada (IA) se o arquivo for uma foto/digitalização."));
+      alert("Erro na Extração Local: " + (err.message || "Tente a IA Avançada."));
     } finally {
       setIsExtracting(false);
       setExtractionProgress('');
