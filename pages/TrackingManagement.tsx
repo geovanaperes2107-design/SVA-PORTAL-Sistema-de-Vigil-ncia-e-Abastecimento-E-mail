@@ -132,6 +132,12 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
           </div>
         </div>
         <div className="flex gap-4">
+          {(order as any).attachmentUrl && (
+            <a href={(order as any).attachmentUrl} target="_blank" rel="noopener noreferrer" className="h-20 w-20 bg-blue-50/10 dark:bg-blue-900/10 text-primary dark:text-blue-400 hover:bg-primary hover:text-white rounded-[1.5rem] flex flex-col items-center justify-center transition-all border border-primary/20 hover:scale-105 shadow-sm group text-[10px] font-black uppercase">
+              <span className="material-symbols-outlined text-3xl mb-1">attach_file</span>
+              Anexo
+            </a>
+          )}
           <button onClick={() => onDecline(order.id)} className="h-20 w-20 bg-danger/10 dark:bg-red-900/10 text-danger hover:bg-danger hover:text-white rounded-[1.5rem] flex items-center justify-center transition-all border border-danger/20 active:scale-90 shadow-lg shadow-danger/20 group">
             <span className="material-symbols-outlined text-4xl font-black">{isNew ? 'delete' : 'close'}</span>
           </button>
@@ -230,11 +236,35 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     return Array.from(map.entries());
   }, [triagemOrders, selectedClass]);
 
+  const uploadAttachment = async (file: File): Promise<string | null> => {
+    try {
+      setExtractionProgress('SVA STORAGE: Upload do documento em andamento...');
+      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const { data, error } = await supabase.storage.from('purchase_order_attachments').upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+      if (error) {
+        console.error("Storage upload error:", error);
+        return null; // Falha no upload é tolerada neste escopo
+      }
+      const { data: publicData } = supabase.storage.from('purchase_order_attachments').getPublicUrl(fileName);
+      return publicData.publicUrl;
+    } catch (err) {
+      console.error("Unexpected upload error:", err);
+      return null;
+    }
+  };
+
   const localExtract = async (file: File) => {
     setIsExtracting(true);
     setWizardStep('upload');
     setExtractionProgress('SVA LOCAL: Digitalizando PDF...');
+    let attachmentUrl: string | null = null;
     try {
+      // 1. Upload the file
+      attachmentUrl = await uploadAttachment(file);
+
       const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
       GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(await import('pdfjs-dist/package.json')).version}/build/pdf.worker.min.mjs`;
 
@@ -359,6 +389,11 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         throw new Error("Não foi possível detectar fornecedores e itens. Verifique se o PDF tem texto selecionável ou use a Extração de IA.");
       }
 
+      if (attachmentUrl) {
+        result.attachmentUrl = attachmentUrl;
+        result.suppliers.forEach((s: any) => s.attachmentUrl = attachmentUrl);
+      }
+
       setExtractionResult(result);
       setWizardStep('verify');
     } catch (err: any) {
@@ -374,7 +409,11 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     setIsExtracting(true);
     setWizardStep('upload');
     setExtractionProgress('Iniciando digitalização do documento...');
+    let attachmentUrl: string | null = null;
     try {
+      // 1. Upload do arquivo original
+      attachmentUrl = await uploadAttachment(file);
+
       let images: string[] = [];
 
       if (file.type === 'application/pdf') {
@@ -423,6 +462,11 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           throw new Error(data.message || data.error || 'Falha na resposta da IA');
       }
 
+      if (attachmentUrl) {
+          data.attachmentUrl = attachmentUrl;
+          data.suppliers.forEach((s: any) => s.attachmentUrl = attachmentUrl);
+      }
+
       setExtractionResult(data);
       setWizardStep('verify');
     } catch (err: any) {
@@ -465,7 +509,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             cnpj: supplierData.cnpj || existingOrder.cnpj,
             order_number: supplierData.orderNumber || existingOrder.order_number,
             expected_delivery_date: supplierData.deliveryDeadline || existingOrder.expected_delivery_date,
-            total_value: supplierData.totalValue || existingOrder.total_value
+            total_value: supplierData.totalValue || existingOrder.total_value,
+            attachment_url: supplierData.attachmentUrl || existingOrder.attachment_url
           }).eq('id', existingOrder.id).select().single();
           targetOrder = updated;
         } else {
@@ -477,7 +522,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             quotation_number: identifiedQuotation,
             status: OrderStatus.Triagem,
             product_class: selectedClass || null,
-            total_value: supplierData.totalValue || 0
+            total_value: supplierData.totalValue || 0,
+            attachment_url: supplierData.attachmentUrl || null
           }).select().single();
           targetOrder = inserted;
         }

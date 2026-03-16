@@ -777,7 +777,14 @@ const MonitoringHistory: React.FC<{ orders: PurchaseOrder[], setOrders: React.Di
                               </div>
                               <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-800">
                                 <div className="text-xl font-black text-slate-900 dark:text-white tracking-tighter">R$ {o.totalValue.toFixed(2)}</div>
-                                <span className="text-[10px] font-black text-slate-300 dark:text-slate-600 uppercase">{o.type}</span>
+                                <div className="flex items-center gap-3">
+                                  {o.attachmentUrl && (
+                                    <a href={o.attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-emerald-500 transition-colors flex items-center" title="Ver Documento Original">
+                                      <span className="material-symbols-outlined text-lg">attach_file</span>
+                                    </a>
+                                  )}
+                                  <span className="text-[10px] font-black text-slate-300 dark:text-slate-600 uppercase">{o.type}</span>
+                                </div>
                               </div>
                             </div>
                           ))}

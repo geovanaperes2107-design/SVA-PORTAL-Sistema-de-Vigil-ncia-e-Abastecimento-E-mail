@@ -111,4 +111,5 @@ export interface PurchaseOrder {
   quotationTitle?: string;
   responsibleBuyer?: string;
   cnpj?: string;
+  attachmentUrl?: string;
 }

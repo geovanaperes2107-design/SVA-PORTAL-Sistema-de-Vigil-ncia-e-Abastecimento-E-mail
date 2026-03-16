@@ -75,6 +75,8 @@ const App: React.FC = () => {
           realLeadTime: o.real_lead_time,
           coverageDays: o.coverage_days,
           reliabilityIndex: o.reliability_index,
+          cnpj: o.cnpj,
+          attachmentUrl: o.attachment_url,
           items: o.order_items.map((i: any) => ({
             productId: i.product_id,
             product: i.product ? {
