@@ -380,21 +380,33 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               if (codeMatch) {
                  code = codeMatch[1];
                  description = rawDesc.replace(/^(\d{4,12})\s+/, '').trim();
-              } else {
-                 // Busca a linha anterior (ou anteriores) que possa ter o código e descrição principal
-                 for (let k = 1; k <= 2; k++) {
-                     if (j - k >= 0) {
-                         const prevLine = blockLines[j - k];
-                         const prevCodeMatch = prevLine.match(/^\s*(\d{4,12})\s+(.+)/);
-                         if (prevCodeMatch) {
-                             code = prevCodeMatch[1];
-                             description = `${prevCodeMatch[2]} ${description}`.trim();
-                             break;
-                         } else if (prevLine.match(/^[A-Z]/) && !prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo/i)) {
-                             description = `${prevLine} ${description}`.trim();
-                         }
-                     }
-                 }
+              }
+              
+              // Busca as linhas anteriores que compõem a descrição do produto
+              // Especialmente útil se o layout joga o Nome pra cima e deixa só o Fabricante na linha do preço
+              let prependDesc = "";
+              for (let k = 1; k <= 3; k++) {
+                  if (j - k >= 0) {
+                      const prevLine = blockLines[j - k].trim();
+                      
+                      // Para se encontrar outro item fechado ou cabeçalhos
+                      if (prevLine.match(itemRegex) || prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) {
+                          break;
+                      }
+                      
+                      const prevCodeMatch = prevLine.match(/^\s*(\d{4,12})\s+(.+)/);
+                      if (prevCodeMatch) {
+                          if (code === "---") code = prevCodeMatch[1];
+                          prependDesc = `${prevCodeMatch[2]} ${prependDesc}`.trim();
+                          break; // Encontrou o código, geralmente é o começo do bloco deste item
+                      } else if (prevLine.match(/^[a-zA-ZÀ-ÿ0-9]/)) {
+                          prependDesc = `${prevLine} ${prependDesc}`.trim();
+                      }
+                  }
+              }
+              
+              if (prependDesc) {
+                  description = `${prependDesc} ${description}`.trim();
               }
 
               if (description.length > 2) {
