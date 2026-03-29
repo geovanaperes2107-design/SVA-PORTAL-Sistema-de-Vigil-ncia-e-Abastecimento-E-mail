@@ -434,13 +434,15 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             }
 
             let description = descriptionText
+                  .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?|C[OÓ]D\.?\s+ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?)\b/gi, '')
                   .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
-                  .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação)\b/gi, '')
-                  .replace(new RegExp('^\\s*' + code + '\\s*'), '')
-                  .replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '')
+                  .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação|KDL|BRASIL|CM\.PR\.MD\.HS|PROD\.)\b/gi, '')
+                  .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
+                  .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
+                  .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial)\b/gi, '')
+                  .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
                   .replace(/\s+/g, ' ')
-                  .replace(/^-(\s*-)*$/, '')
-                  .trim();
+                  .replace(/^[-\s]+|[-\s]+$/g, '');
 
             if (description.length > 2 && !isNaN(quantity) && !isNaN(unitPrice)) {
                 supplierData.items.push({
