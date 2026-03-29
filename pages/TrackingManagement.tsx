@@ -283,7 +283,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const linesMap: { [y: number]: any[] } = {};
         
         items.forEach(item => {
-          const y = Math.round(item.transform[5]);
+          const y = parseFloat(item.transform[5].toFixed(2));
           if (!linesMap[y]) linesMap[y] = [];
           linesMap[y].push(item);
         });
