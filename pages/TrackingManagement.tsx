@@ -338,13 +338,16 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       for (const blockLines of supplierBlocks) {
         const fullBlockStr = blockLines.map((l: any) => l.str).join('\n');
         
-        let name = "";
-        const nameMatch = fullBlockStr.match(/FORNECEDOR[: ]*([^\n]+)/i) || fullBlockStr.match(/EMPRESA[: ]*([^\n]+)/i);
-        if (nameMatch) {
-            name = nameMatch[1].split('CNPJ')[0].trim();
-        } else {
-            name = blockLines[0].str.replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
-            if (!name || name.length < 3) name = blockLines[1]?.str.split('  ')[0].trim() || "";
+        let name = blockLines[0].str.split('  ')[0].trim();
+        
+        // Se a primeira linha for literalmente só "Dados do fornecedor" ou vazia, tenta o fallback
+        if (!name || name.length < 3 || name.match(/Dados do Fornecedor|FORNECEDOR[:]/i)) {
+            const nameMatch = fullBlockStr.match(/FORNECEDOR[: ]*([^@\n]+)(?:@|\n|$)/i) || fullBlockStr.match(/EMPRESA[: ]*([^@\n]+)/i);
+            if (nameMatch) {
+                name = nameMatch[1].split('CNPJ')[0].trim();
+            } else if (blockLines[1]) {
+                name = blockLines[1].str.split('  ')[0].trim();
+            }
         }
 
         const supplierData: any = {
@@ -380,6 +383,9 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                     continue;
                 }
                 
+                // Omitir o nome do fornecedor (primeira linha) para que não seja pego pelo primeiro item
+                if (k === 0) continue; 
+
                 // Ignorar estruturas do relatorio
                 if (orphan.str.trim() === "---PAGE_BREAK---") continue;
                 if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) continue;
