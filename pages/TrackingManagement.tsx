@@ -351,6 +351,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           items: []
         };
 
+        const claimedLines = new Set<number>();
+
         for (let j = 0; j < blockLines.length; j++) {
           const line = blockLines[j];
           // Novo Regex Extrator Exato (de trás pra frente garante que a Embalagem não atrapalhe a Quantidade)
@@ -372,56 +374,79 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               // Se tiver 'caixa', 'pacote', etc no final, a gente remove.
               rawDesc = rawDesc.replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '').trim();
 
-              const codeMatch = rawDesc.match(/^(\d{2,12})\s+/);
-              
+              // We establish boundaries to ensure we don't steal lines from other items
               let code = "---";
-              let description = rawDesc;
-
-              if (codeMatch) {
-                 code = codeMatch[1];
-                 description = rawDesc.replace(/^(\d{2,12})\s+/, '').trim();
-              }
+              let startIdx = j;
               
-              // Busca as linhas anteriores que compõem a descrição do produto
-              // Especialmente útil se o layout joga o Nome pra cima e deixa só o Fabricante na linha do preço
-              let prependDesc = "";
-              for (let k = 1; k <= 7; k++) {
-                  if (j - k >= 0) {
-                      let prevLine = blockLines[j - k].trim();
+              const inlineCodeMatch = match[1].trim().match(/^(\d{2,12})\s+/);
+              if (inlineCodeMatch) {
+                  code = inlineCodeMatch[1];
+              } else {
+                  // Look UP for the code, stopping if we hit a claimed line or structural headers
+                  for (let k = j - 1; k >= 0; k--) {
+                      if (claimedLines.has(k)) break;
+                      const checkLine = blockLines[k].trim();
+                      if (checkLine.match(itemRegex)) break; // Another item
+                      if (checkLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) break;
                       
-                      // Para se encontrar outro item fechado ou cabeçalhos
-                      if (prevLine.match(itemRegex) || prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Observação|Confirmado/i)) {
+                      const pCodeMatch = checkLine.match(/^\s*(\d{2,12})\s+/);
+                      const isolatedCodeMatch = checkLine.match(/^\s*(\d{2,12})\s*$/);
+                      
+                      if (pCodeMatch) {
+                          code = pCodeMatch[1];
+                          startIdx = k;
+                          break;
+                      } else if (isolatedCodeMatch) {
+                          code = isolatedCodeMatch[1];
+                          startIdx = k;
                           break;
                       }
-
-                      // Limpa datas (24/03/2026), horas (17:30) e booleanos (FALSE/TRUE) que possam ter se misturado na linha
-                      prevLine = prevLine.replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '').replace(/\s+/g, ' ').trim();
                       
-                      if (!prevLine || prevLine === '-' || prevLine === '--' || prevLine.match(/^(R\$|[\d.,]+)$/)) continue;
-                      
-                      // Agora aceita códigos a partir de 2 digitos (ex: código 373)
-                      const prevCodeMatch = prevLine.match(/^\s*(\d{2,12})\s+(.+)/);
-                      const isolatedCodeMatch = prevLine.match(/^\s*(\d{2,12})\s*$/);
-
-                      if (prevCodeMatch) {
-                          if (code === "---") code = prevCodeMatch[1];
-                          prependDesc = `${prevCodeMatch[2]} ${prependDesc}`.trim();
-                          break; // Encontrou o código, geralmente é o começo do bloco deste item
-                      } else if (isolatedCodeMatch) {
-                          if (code === "---") code = isolatedCodeMatch[1];
-                          break; // Código isolado, bloco acabou
-                      } else if (prevLine.match(/^[a-zA-ZÀ-ÿ0-9]/)) {
-                          prependDesc = `${prevLine} ${prependDesc}`.trim();
+                      if (checkLine === "---" || checkLine === "--") {
+                          startIdx = k;
+                          break;
                       }
+                      // Keep expanding upwards if no code found yet (to capture leading descriptions)
+                      startIdx = k;
                   }
               }
-              
-              if (prependDesc) {
-                  description = `${prependDesc} ${description}`.trim();
+
+              // Look DOWN to capture trailing descriptions
+              let endIdx = j;
+              for (let k = j + 1; k < blockLines.length; k++) {
+                  if (claimedLines.has(k)) break;
+                  const checkLine = blockLines[k].trim();
+                  if (checkLine.match(itemRegex)) break; // Reached next item
+                  if (checkLine.match(/^\s*(\d{2,12})\s+/)) break; // Reached next code
+                  if (checkLine.match(/^\s*(\d{2,12})\s*$/)) break; // Reached next isolated code
+                  if (checkLine === "---" || checkLine === "--") break;
+                  if (checkLine.match(/CNPJ|FORNECEDOR|TOTAL|SUBTOTAL|Validade/i)) break;
+                  endIdx = k;
               }
-              
-              // Limpa lixos embutidos finais da descrição caso tenham ficado na linha principal (quando o PDF.js junta todas colunas numa única linha)
-              description = description.replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '').replace(/\b(?:DO PRODUTO|PRODUTO EM)\b/gi, '').replace(/\s+/g, ' ').trim();
+
+              // Claim all lines in this block so they aren't parsed by adjacent items
+              for (let k = startIdx; k <= endIdx; k++) claimedLines.add(k);
+
+              // Concatenate text
+              let descriptionText = "";
+              for (let k = startIdx; k <= endIdx; k++) {
+                  let str = blockLines[k].trim();
+                  if (k === j) {
+                      const matchLine = str.match(itemRegex);
+                      if (matchLine) str = matchLine[1].trim(); // Take only the part before Qty
+                  }
+                  descriptionText += " " + str;
+              }
+
+              // Sanitize final text
+              let description = descriptionText
+                  .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
+                  .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação)\b/gi, '')
+                  .replace(new RegExp('^\\s*' + code + '\\s*'), '')
+                  .replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '')
+                  .replace(/\s+/g, ' ')
+                  .replace(/^-(\s*-)*$/, '')
+                  .trim();
 
               if (description.length > 2) {
                 supplierData.items.push({
