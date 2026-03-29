@@ -442,6 +442,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                   .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
                   .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
                   .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
+                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLARFIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX)\b/gi, '')
                   .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial)\b/gi, '')
                   .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
                   .replace(/\s+/g, ' ')
