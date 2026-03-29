@@ -372,14 +372,14 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               // Se tiver 'caixa', 'pacote', etc no final, a gente remove.
               rawDesc = rawDesc.replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '').trim();
 
-              const codeMatch = rawDesc.match(/^(\d{4,12})\s+/);
+              const codeMatch = rawDesc.match(/^(\d{2,12})\s+/);
               
               let code = "---";
               let description = rawDesc;
 
               if (codeMatch) {
                  code = codeMatch[1];
-                 description = rawDesc.replace(/^(\d{4,12})\s+/, '').trim();
+                 description = rawDesc.replace(/^(\d{2,12})\s+/, '').trim();
               }
               
               // Busca as linhas anteriores que compõem a descrição do produto
@@ -401,10 +401,15 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                       
                       // Agora aceita códigos a partir de 2 digitos (ex: código 373)
                       const prevCodeMatch = prevLine.match(/^\s*(\d{2,12})\s+(.+)/);
+                      const isolatedCodeMatch = prevLine.match(/^\s*(\d{2,12})\s*$/);
+
                       if (prevCodeMatch) {
                           if (code === "---") code = prevCodeMatch[1];
                           prependDesc = `${prevCodeMatch[2]} ${prependDesc}`.trim();
                           break; // Encontrou o código, geralmente é o começo do bloco deste item
+                      } else if (isolatedCodeMatch) {
+                          if (code === "---") code = isolatedCodeMatch[1];
+                          break; // Código isolado, bloco acabou
                       } else if (prevLine.match(/^[a-zA-ZÀ-ÿ0-9]/)) {
                           prependDesc = `${prevLine} ${prependDesc}`.trim();
                       }
@@ -414,6 +419,9 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               if (prependDesc) {
                   description = `${prependDesc} ${description}`.trim();
               }
+              
+              // Limpa lixos embutidos finais da descrição caso tenham ficado na linha principal (quando o PDF.js junta todas colunas numa única linha)
+              description = description.replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '').replace(/\b(?:DO PRODUTO|PRODUTO EM)\b/gi, '').replace(/\s+/g, ' ').trim();
 
               if (description.length > 2) {
                 supplierData.items.push({
