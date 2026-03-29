@@ -87,7 +87,7 @@ const DRERow = ({ label, value, color = "text-slate-600 dark:text-slate-300" }: 
 
 // --- COMPONENTES DE TRIAGEM ---
 
-const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDecline: any, isNew?: boolean }> = ({ order, onConfirm, onDecline, isNew }) => {
+const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDecline: any, onRemove?: any, isNew?: boolean }> = ({ order, onConfirm, onDecline, onRemove, isNew }) => {
   const [localData, setLocalData] = useState<any>(null);
 
   useEffect(() => {
@@ -351,29 +351,27 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           items: []
         };
 
-        const units = ["UN", "UNS", "UND", "CX", "CXS", "PC", "FR", "KG", "ML", "PCT", "PCTS", "LT", "L", "GL", "DZ", "PAR", "ENV", "AMP", "BIS", "GAL"];
-        
         for (let j = 0; j < blockLines.length; j++) {
           const line = blockLines[j];
-          const words = line.trim().split(/\s+/);
-          // Look for units as row indicators
-          const unitIdx = words.findIndex(w => units.includes(w.toUpperCase()));
-          
-          if (unitIdx !== -1) {
-            const unit = words[unitIdx].toUpperCase();
-            
-            // Pattern: [Description...] [Qty] [Unit] [Price] [Total]
-            const qtyStr = words[unitIdx - 1]?.replace('.', '').replace(',', '.');
-            const quantity = parseFloat(qtyStr);
-            
-            // Price is usually after Unit
-            const prices = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/g) || line.match(/(\d+[.,]\d{2})/g);
-            
-            if (!isNaN(quantity) && prices && prices.length >= 1) {
-              const unitPriceStr = prices[prices.length - (prices.length > 1 ? 2 : 1)].replace('.', '').replace(',', '.');
-              const unitPrice = parseFloat(unitPriceStr);
-              
-              const rawDesc = words.slice(0, unitIdx - 1).join(' ').trim();
+          // Novo Regex Extrator Exato (de trás pra frente garante que a Embalagem não atrapalhe a Quantidade)
+          // Padrao esperado no final: [Qtd] [UNS] [ValorUnit] [ValorTotal]
+          const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
+          const match = line.match(itemRegex);
+
+          if (match) {
+            let rawDesc = match[1].trim();
+            const qtyStr = match[2];
+            const unit = match[3].toUpperCase();
+            const unitPriceStr = match[4];
+
+            const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
+            const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
+
+            if (!isNaN(quantity) && !isNaN(unitPrice)) {
+              // Limpar Embalagem "poluindo" a descrição, já que a Embalagem também aparece aqui (ex: 'pacote c/ 100.0')
+              // Se tiver 'caixa', 'pacote', etc no final, a gente remove.
+              rawDesc = rawDesc.replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '').trim();
+
               const codeMatch = rawDesc.match(/^(\d{4,12})\s+/);
               
               let code = "---";
@@ -383,7 +381,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                  code = codeMatch[1];
                  description = rawDesc.replace(/^(\d{4,12})\s+/, '').trim();
               } else {
-                 // Look at the previous line(s) for the code and main description
+                 // Busca a linha anterior (ou anteriores) que possa ter o código e descrição principal
                  for (let k = 1; k <= 2; k++) {
                      if (j - k >= 0) {
                          const prevLine = blockLines[j - k];
@@ -392,14 +390,14 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                              code = prevCodeMatch[1];
                              description = `${prevCodeMatch[2]} ${description}`.trim();
                              break;
-                         } else if (prevLine.match(/^[A-Z]/) && !prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone/i)) {
+                         } else if (prevLine.match(/^[A-Z]/) && !prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo/i)) {
                              description = `${prevLine} ${description}`.trim();
                          }
                      }
                  }
               }
 
-              if (description.length > 2 && !isNaN(unitPrice)) {
+              if (description.length > 2) {
                 supplierData.items.push({
                   code: code,
                   description: description,
@@ -520,83 +518,89 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     }
   };
 
+  const persistSingleSupplier = async (supplierData: any, status: OrderStatus) => {
+    const identifiedQuotation = extractionResult?.quotationNumber || "0000";
+    
+    const { data: existingOrder } = await supabase.from('purchase_orders')
+      .select('*')
+      .eq('quotation_number', identifiedQuotation)
+      .ilike('supplier_name', `%${supplierData.name}%`)
+      .maybeSingle();
+
+    let targetOrder;
+    if (existingOrder) {
+      const { data: updated } = await supabase.from('purchase_orders').update({
+        cnpj: supplierData.cnpj || existingOrder.cnpj,
+        order_number: supplierData.orderNumber || existingOrder.order_number,
+        expected_delivery_date: supplierData.deliveryDeadline || existingOrder.expected_delivery_date,
+        total_value: supplierData.totalValue || existingOrder.total_value,
+        attachment_url: supplierData.attachmentUrl || existingOrder.attachment_url,
+        status: status
+      }).eq('id', existingOrder.id).select().single();
+      targetOrder = updated;
+    } else {
+      const { data: inserted } = await supabase.from('purchase_orders').insert({
+        supplier_name: supplierData.name,
+        cnpj: supplierData.cnpj || null,
+        order_number: supplierData.orderNumber || null,
+        expected_delivery_date: supplierData.deliveryDeadline || null,
+        quotation_number: identifiedQuotation,
+        status: status,
+        product_class: selectedClass || null,
+        total_value: supplierData.totalValue || 0,
+        attachment_url: supplierData.attachmentUrl || null
+      }).select().single();
+      targetOrder = inserted;
+    }
+
+    if (!targetOrder) return null;
+
+    // Persistir itens
+    const itemsToInsert = [];
+    for (const it of (supplierData.items || [])) {
+      const { data: prod } = await supabase.from('products').select('id').or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`).maybeSingle();
+      let productId = prod?.id;
+
+      if (!productId) {
+        const { data: newProd } = await supabase.from('products').insert({
+          name: it.description || 'Produto Extraído',
+          code_mv_ses: it.code || null,
+          unit: it.unit || 'un',
+          unit_price: it.unitPrice || 0,
+          product_class: selectedClass || null
+        }).select().single();
+        productId = newProd?.id;
+      }
+
+      if (productId) {
+        itemsToInsert.push({
+          order_id: targetOrder.id,
+          product_id: productId,
+          order_quantity: it.quantity || 0,
+          total_value_oc: (it.quantity || 0) * (it.unitPrice || 0)
+        });
+      }
+    }
+
+    if (itemsToInsert.length > 0) {
+      await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
+      await supabase.from('order_items').insert(itemsToInsert);
+    }
+    
+    return targetOrder;
+  };
+
   const persistVerification = async () => {
     if (!extractionResult) return;
     setIsExtracting(true);
     setExtractionProgress('Persistindo dados no banco de segurança...');
 
     try {
-      const identifiedQuotation = extractionResult.quotationNumber || "0000";
       const updatedOrders: PurchaseOrder[] = [];
 
       for (const supplierData of (extractionResult.suppliers || [])) {
-        // Encontrar ordem existente ou criar nova
-        const { data: existingOrder } = await supabase.from('purchase_orders')
-          .select('*')
-          .eq('quotation_number', identifiedQuotation)
-          .ilike('supplier_name', `%${supplierData.name}%`)
-          .maybeSingle();
-
-        let targetOrder;
-        if (existingOrder) {
-          const { data: updated } = await supabase.from('purchase_orders').update({
-            cnpj: supplierData.cnpj || existingOrder.cnpj,
-            order_number: supplierData.orderNumber || existingOrder.order_number,
-            expected_delivery_date: supplierData.deliveryDeadline || existingOrder.expected_delivery_date,
-            total_value: supplierData.totalValue || existingOrder.total_value,
-            attachment_url: supplierData.attachmentUrl || existingOrder.attachment_url
-          }).eq('id', existingOrder.id).select().single();
-          targetOrder = updated;
-        } else {
-          const { data: inserted } = await supabase.from('purchase_orders').insert({
-            supplier_name: supplierData.name,
-            cnpj: supplierData.cnpj || null,
-            order_number: supplierData.orderNumber || null,
-            expected_delivery_date: supplierData.deliveryDeadline || null,
-            quotation_number: identifiedQuotation,
-            status: OrderStatus.Triagem,
-            product_class: selectedClass || null,
-            total_value: supplierData.totalValue || 0,
-            attachment_url: supplierData.attachmentUrl || null
-          }).select().single();
-          targetOrder = inserted;
-        }
-
-        if (!targetOrder) continue;
-
-        // Persistir itens
-        const itemsToInsert = [];
-        for (const it of (supplierData.items || [])) {
-          const { data: prod } = await supabase.from('products').select('id').or(`name.ilike."${it.description}",code_mv_ses.eq."${it.code}"`).maybeSingle();
-          let productId = prod?.id;
-
-          if (!productId) {
-            const { data: newProd } = await supabase.from('products').insert({
-              name: it.description || 'Produto Extraído',
-              code_mv_ses: it.code || null,
-              unit: it.unit || 'un',
-              unit_price: it.unitPrice || 0,
-              product_class: selectedClass || null
-            }).select().single();
-            productId = newProd?.id;
-          }
-
-          if (productId) {
-            itemsToInsert.push({
-              order_id: targetOrder.id,
-              product_id: productId,
-              order_quantity: it.quantity || 0,
-              total_value_oc: (it.quantity || 0) * (it.unitPrice || 0)
-            });
-          }
-        }
-
-        if (itemsToInsert.length > 0) {
-          await supabase.from('order_items').delete().eq('order_id', targetOrder.id);
-          await supabase.from('order_items').insert(itemsToInsert);
-        }
-        
-        updatedOrders.push(targetOrder as any);
+        const targetOrder = await persistSingleSupplier(supplierData, OrderStatus.Triagem);
+        if (targetOrder) updatedOrders.push(targetOrder as any);
       }
 
       setOrders((prev: any) => {
@@ -606,7 +610,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
       setWizardStep('upload');
       setExtractionResult(null);
-      alert("Processamento Profissional Concluído!");
+      alert("Processamento Concluído!");
     } catch (err: any) {
       alert("Erro ao persistir: " + err.message);
     } finally {
@@ -653,11 +657,55 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
           <div className="grid gap-12">
             {(extractionResult.suppliers || []).map((s: any, idx: number) => (
-              <SupplierTriageCard key={`ext-${idx}`} order={s as any} onConfirm={() => {}} onDecline={() => {
-                const newRes = {...extractionResult};
-                newRes.suppliers.splice(idx, 1);
-                setExtractionResult(newRes);
-              }} isNew={true} />
+              <SupplierTriageCard 
+                key={`ext-${idx}`} 
+                order={s as any} 
+                onConfirm={async () => {
+                  try {
+                    const targetOrder = await persistSingleSupplier(s, OrderStatus.AguardandoEntrega);
+                    if (targetOrder) {
+                      setOrders((prev: any) => [...prev.filter((o: any) => o.id !== targetOrder.id), targetOrder]);
+                      const newRes = {...extractionResult};
+                      newRes.suppliers.splice(idx, 1);
+                      if (newRes.suppliers.length === 0) {
+                        setExtractionResult(null);
+                        setWizardStep('upload');
+                      } else {
+                        setExtractionResult(newRes);
+                      }
+                      alert('Ordem Confirmada com Sucesso!');
+                    }
+                  } catch (e: any) { alert(e.message); }
+                }} 
+                onDecline={async () => {
+                  try {
+                    const targetOrder = await persistSingleSupplier(s, OrderStatus.Declinado);
+                    if (targetOrder) {
+                      setOrders((prev: any) => [...prev.filter((o: any) => o.id !== targetOrder.id), targetOrder]);
+                      const newRes = {...extractionResult};
+                      newRes.suppliers.splice(idx, 1);
+                      if (newRes.suppliers.length === 0) {
+                        setExtractionResult(null);
+                        setWizardStep('upload');
+                      } else {
+                        setExtractionResult(newRes);
+                      }
+                      alert('Ordem Declinada (Cancelada) com Sucesso!');
+                    }
+                  } catch (e: any) { alert(e.message); }
+                }} 
+                onRemove={() => {
+                  const newRes = {...extractionResult};
+                  newRes.suppliers.splice(idx, 1);
+                  if (newRes.suppliers.length === 0) {
+                    setExtractionResult(null);
+                    setWizardStep('upload');
+                  } else {
+                    setExtractionResult(newRes);
+                  }
+                }}
+                isNew={true} 
+              />
             ))}
           </div>
         </div>
