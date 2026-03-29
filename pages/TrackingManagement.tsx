@@ -388,7 +388,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
                 // Ignorar estruturas do relatorio
                 if (orphan.str.trim() === "---PAGE_BREAK---") continue;
-                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) continue;
+                if (orphan.str.match(/HTTPS?:\/\//i) || orphan.str.match(/P[AÁ]G\.\s*\d+/i)) continue;
+                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|Mínimo|Condições|Pagamento|Ordem de Compra|C[OÓ]D\./i)) continue;
                 if (orphan.str.match(/^[-\s]*$/)) continue;
 
                 const distToMe = Math.abs(orphan.y - anchor.y);
@@ -434,11 +435,13 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             }
 
             let description = descriptionText
-                  .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?|C[OÓ]D\.?\s+ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?)\b/gi, '')
+                  .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
+                  .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
                   .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
                   .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação|KDL|BRASIL|CM\.PR\.MD\.HS|PROD\.)\b/gi, '')
                   .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
                   .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
+                  .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
                   .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial)\b/gi, '')
                   .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
                   .replace(/\s+/g, ' ')
