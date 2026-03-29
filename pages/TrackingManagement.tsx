@@ -271,7 +271,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await getDocument({ data: arrayBuffer }).promise;
       
-      let allLines: string[] = [];
+      let allLines: any[] = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
         setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
@@ -295,19 +295,21 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           // Sort items on the same line by X coordinate (transform[4])
           const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
           const lineText = lineItems.map(item => item.str).join(' ');
-          if (lineText.trim()) allLines.push(lineText);
+          if (lineText.trim()) allLines.push({ str: lineText, y: y });
         });
         
-        allLines.push("---PAGE_BREAK---");
+        allLines.push({ str: "---PAGE_BREAK---", y: -9999 });
       }
 
       setExtractionProgress('SVA LOCAL: Analisando Estrutura...');
-      const fullText = allLines.join('\n');
+      const fullText = allLines.map(l => l.str).join('\n');
       
       const result: any = {
         quotationNumber: (fullText.match(/Cotação[: ]*(\d+)/i) || fullText.match(/#(\d+)/) || [null, (file.name.match(/\d+/) || ["0000"])[0]])[1],
         suppliers: []
       };
+
+      const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
 
       // Split by Supplier - Identifying blocks
       const supplierBlocks: any[][] = [];
