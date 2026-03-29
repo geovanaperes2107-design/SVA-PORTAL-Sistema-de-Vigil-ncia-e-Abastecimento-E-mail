@@ -385,7 +385,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               // Busca as linhas anteriores que compõem a descrição do produto
               // Especialmente útil se o layout joga o Nome pra cima e deixa só o Fabricante na linha do preço
               let prependDesc = "";
-              for (let k = 1; k <= 3; k++) {
+              for (let k = 1; k <= 7; k++) {
                   if (j - k >= 0) {
                       const prevLine = blockLines[j - k].trim();
                       
@@ -394,7 +394,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                           break;
                       }
                       
-                      const prevCodeMatch = prevLine.match(/^\s*(\d{4,12})\s+(.+)/);
+                      // Agora aceita códigos a partir de 2 digitos (ex: código 373)
+                      const prevCodeMatch = prevLine.match(/^\s*(\d{2,12})\s+(.+)/);
                       if (prevCodeMatch) {
                           if (code === "---") code = prevCodeMatch[1];
                           prependDesc = `${prevCodeMatch[2]} ${prependDesc}`.trim();
