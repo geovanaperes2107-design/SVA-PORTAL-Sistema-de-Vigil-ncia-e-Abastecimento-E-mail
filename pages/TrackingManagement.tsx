@@ -309,7 +309,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         suppliers: []
       };
 
-      const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
+      const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL|RLS|RL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
 
       // Split by Supplier - Identifying blocks
       const supplierBlocks: any[][] = [];
@@ -438,15 +438,17 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                   .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
                   .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
                   .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
-                  .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação|KDL|BRASIL|CM\.PR\.MD\.HS|PROD\.)\b/gi, '')
+                  .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
+                  .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '')
                   .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
                   .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
                   .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
-                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLARFIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX)\b/gi, '')
-                  .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial)\b/gi, '')
+                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA)\b/gi, '')
+                  .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial|PROD\.?)(?=\s|$|\W)/gi, '')
                   .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
                   .replace(/\s+/g, ' ')
-                  .replace(/^[-\s]+|[-\s]+$/g, '');
+                  .replace(/^[-\s]+|[-\s]+$/g, '')
+                  .replace(/^\d{1,4}\s+/, '');
 
             if (description.length > 2 && !isNaN(quantity) && !isNaN(unitPrice)) {
                 supplierData.items.push({
