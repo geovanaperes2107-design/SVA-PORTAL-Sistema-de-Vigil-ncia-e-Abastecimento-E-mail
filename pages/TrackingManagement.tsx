@@ -310,136 +310,122 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       };
 
       // Split by Supplier - Identifying blocks
-      const supplierBlocks: string[][] = [];
-      let currentBlock: string[] = [];
+      const supplierBlocks: any[][] = [];
+      let currentBlock: any[] = [];
       
-      allLines.forEach(line => {
-          const cleanLine = line.replace(/\s+/g, ' ').trim();
+      allLines.forEach(lineObj => {
+          if (lineObj.str.trim() === "---PAGE_BREAK---") {
+              // Ignore page breaks for supplier blocking
+              return;
+          }
+          const cleanLine = lineObj.str.replace(/\s+/g, ' ').trim();
           if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR[: ]/i)) {
               if (currentBlock.length > 1) {
                   const potentialSupplierName = currentBlock.pop()!;
                   supplierBlocks.push(currentBlock);
-                  currentBlock = [potentialSupplierName, cleanLine];
+                  currentBlock = [potentialSupplierName, lineObj];
               } else {
-                  currentBlock.push(cleanLine);
+                  currentBlock.push(lineObj);
               }
           } else {
-              currentBlock.push(cleanLine);
+              currentBlock.push(lineObj);
           }
       });
       if (currentBlock.length > 0) supplierBlocks.push(currentBlock);
 
       for (const blockLines of supplierBlocks) {
-        const fullBlock = blockLines.join('\n');
+        const fullBlockStr = blockLines.map((l: any) => l.str).join('\n');
         
-        // Extract Name from "Dados do Fornecedor" preceding line or first line
         let name = "";
-        const dadosIdx = blockLines.findIndex(l => l.match(/Dados do Fornecedor/i));
-        if (dadosIdx > 0) {
-            name = blockLines[dadosIdx - 1].replace(/^\d+\s+/, '').trim();
+        const nameMatch = fullBlockStr.match(/FORNECEDOR[: ]*([^\n]+)/i) || fullBlockStr.match(/EMPRESA[: ]*([^\n]+)/i);
+        if (nameMatch) {
+            name = nameMatch[1].split('CNPJ')[0].trim();
         } else {
-            name = blockLines[0].replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
-            if (!name || name.length < 3) name = blockLines[1]?.split('  ')[0].trim() || "";
+            name = blockLines[0].str.replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
+            if (!name || name.length < 3) name = blockLines[1]?.str.split('  ')[0].trim() || "";
         }
 
         const supplierData: any = {
           name: name || "Fornecedor Identificado",
-          cnpj: (fullBlock.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
-          orderNumber: (fullBlock.match(/Ordem de Compra[: ]*(\d+)/i) || fullBlock.match(/OC[: ]*(\d+)/i) || fullBlock.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
-          deliveryDeadline: (fullBlock.match(/Prazo de entrega[: ]*([^\n]+)/i)?.[1] || fullBlock.match(/(\d+)\s*dias/i)?.[1] || fullBlock.match(/Entrega[: ]*([\d/]+)/i)?.[1] || "---").trim().replace(/Faturamento.*$/i, ''),
+          cnpj: (fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          orderNumber: (fullBlockStr.match(/Ordem de Compra[: ]*(\d+)/i) || fullBlockStr.match(/OC[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
+          deliveryDeadline: (fullBlockStr.match(/Prazo de entrega[: ]*([^\n]+)/i)?.[1] || fullBlockStr.match(/(\d+)\s*dias/i)?.[1] || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i)?.[1] || "---").trim().replace(/Faturamento.*$/i, ''),
           totalValue: 0,
           items: []
         };
 
-        const claimedLines = new Set<number>();
-
+        // Algoritmo de Proximidade (Centroid) para linhas órfãs
+        const anchors: { idx: number, y: number, match: any, str: string }[] = [];
         for (let j = 0; j < blockLines.length; j++) {
-          const line = blockLines[j];
-          // Novo Regex Extrator Exato (de trás pra frente garante que a Embalagem não atrapalhe a Quantidade)
-          // Padrao esperado no final: [Qtd] [UNS] [ValorUnit] [ValorTotal]
-          const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
-          const match = line.match(itemRegex);
+            const lineObj = blockLines[j];
+            const match = lineObj.str.match(itemRegex);
+            if (match) {
+                anchors.push({ idx: j, y: lineObj.y, match: match, str: lineObj.str });
+            }
+        }
 
-          if (match) {
-            let rawDesc = match[1].trim();
-            const qtyStr = match[2];
-            const unit = match[3].toUpperCase();
-            const unitPriceStr = match[4];
+        for (let i = 0; i < anchors.length; i++) {
+            const anchor = anchors[i];
+            const startLimit = i === 0 ? 0 : anchors[i-1].idx + 1;
+            const endLimit = i === anchors.length - 1 ? blockLines.length - 1 : anchors[i+1].idx - 1;
+            
+            const myBlockStrings: string[] = [];
+            
+            for (let k = startLimit; k <= endLimit; k++) {
+                const orphan = blockLines[k];
+                if (k === anchor.idx) {
+                    myBlockStrings.push(orphan.str);
+                    continue;
+                }
+                
+                // Ignorar estruturas do relatorio
+                if (orphan.str.trim() === "---PAGE_BREAK---") continue;
+                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) continue;
+                if (orphan.str.match(/^[-\s]*$/)) continue;
 
+                const distToMe = Math.abs(orphan.y - anchor.y);
+                let closestIsMe = true;
+
+                if (i > 0 && k < anchor.idx) {
+                    const distToPrev = Math.abs(orphan.y - anchors[i-1].y);
+                    if (distToPrev < distToMe) closestIsMe = false;
+                }
+                if (i < anchors.length - 1 && k > anchor.idx) {
+                    const distToNext = Math.abs(orphan.y - anchors[i+1].y);
+                    if (distToNext < distToMe) closestIsMe = false;
+                }
+
+                if (closestIsMe) {
+                    myBlockStrings.push(orphan.str);
+                }
+            }
+
+            // Agora processamos apenas o conteudo que comprovadamente pertence a este item
+            let descriptionText = "";
+            let code = "---";
+            
+            // Dados da âncora (Qtd / Preco)
+            const qtyStr = anchor.match[2];
+            const unitPriceStr = anchor.match[4];
             const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
             const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
+            const unit = anchor.match[3].toUpperCase();
 
-            if (!isNaN(quantity) && !isNaN(unitPrice)) {
-              // Limpar Embalagem "poluindo" a descrição, já que a Embalagem também aparece aqui (ex: 'pacote c/ 100.0')
-              // Se tiver 'caixa', 'pacote', etc no final, a gente remove.
-              rawDesc = rawDesc.replace(/(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)?\s*(?:(?:c\/)?\s*[\d.,]+\s*)?$/i, '').trim();
+            for (const str of myBlockStrings) {
+                let cleanStr = str;
+                if (str === anchor.str) {
+                    cleanStr = anchor.match[1].trim(); // Pega apenas a porção descritiva na linha âncora antes da qtd
+                }
+                
+                const cMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s+/);
+                const isoMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s*$/);
+                if (cMatch && code === "---") code = cMatch[1];
+                else if (isoMatch && code === "---") code = isoMatch[1];
 
-              // We establish boundaries to ensure we don't steal lines from other items
-              let code = "---";
-              let startIdx = j;
-              
-              const inlineCodeMatch = match[1].trim().match(/^(\d{2,12})\s+/);
-              if (inlineCodeMatch) {
-                  code = inlineCodeMatch[1];
-              } else {
-                  // Look UP for the code, stopping if we hit a claimed line or structural headers
-                  for (let k = j - 1; k >= 0; k--) {
-                      if (claimedLines.has(k)) break;
-                      const checkLine = blockLines[k].trim();
-                      if (checkLine.match(itemRegex)) break; // Another item
-                      if (checkLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) break;
-                      
-                      const pCodeMatch = checkLine.match(/^\s*(\d{2,12})\s+/);
-                      const isolatedCodeMatch = checkLine.match(/^\s*(\d{2,12})\s*$/);
-                      
-                      if (pCodeMatch) {
-                          code = pCodeMatch[1];
-                          startIdx = k;
-                          break;
-                      } else if (isolatedCodeMatch) {
-                          code = isolatedCodeMatch[1];
-                          startIdx = k;
-                          break;
-                      }
-                      
-                      if (checkLine === "---" || checkLine === "--") {
-                          startIdx = k;
-                          break;
-                      }
-                      // Keep expanding upwards if no code found yet (to capture leading descriptions)
-                      startIdx = k;
-                  }
-              }
+                descriptionText += " " + cleanStr;
+            }
 
-              // Look DOWN to capture trailing descriptions
-              let endIdx = j;
-              for (let k = j + 1; k < blockLines.length; k++) {
-                  if (claimedLines.has(k)) break;
-                  const checkLine = blockLines[k].trim();
-                  if (checkLine.match(itemRegex)) break; // Reached next item
-                  if (checkLine.match(/^\s*(\d{2,12})\s+/)) break; // Reached next code
-                  if (checkLine.match(/^\s*(\d{2,12})\s*$/)) break; // Reached next isolated code
-                  if (checkLine === "---" || checkLine === "--") break;
-                  if (checkLine.match(/CNPJ|FORNECEDOR|TOTAL|SUBTOTAL|Validade/i)) break;
-                  endIdx = k;
-              }
-
-              // Claim all lines in this block so they aren't parsed by adjacent items
-              for (let k = startIdx; k <= endIdx; k++) claimedLines.add(k);
-
-              // Concatenate text
-              let descriptionText = "";
-              for (let k = startIdx; k <= endIdx; k++) {
-                  let str = blockLines[k].trim();
-                  if (k === j) {
-                      const matchLine = str.match(itemRegex);
-                      if (matchLine) str = matchLine[1].trim(); // Take only the part before Qty
-                  }
-                  descriptionText += " " + str;
-              }
-
-              // Sanitize final text
-              let description = descriptionText
+            let description = descriptionText
                   .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
                   .replace(/\b(?:DO PRODUTO|PRODUTO EM|Código|Descrição|Confirmado|Observação)\b/gi, '')
                   .replace(new RegExp('^\\s*' + code + '\\s*'), '')
@@ -448,7 +434,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                   .replace(/^-(\s*-)*$/, '')
                   .trim();
 
-              if (description.length > 2) {
+            if (description.length > 2 && !isNaN(quantity) && !isNaN(unitPrice)) {
                 supplierData.items.push({
                   code: code,
                   description: description,
@@ -458,9 +444,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                   totalValue: quantity * unitPrice
                 });
                 supplierData.totalValue += (quantity * unitPrice);
-              }
             }
-          }
         }
 
         if (supplierData.items.length > 0 || (supplierData.cnpj && supplierData.name !== "Fornecedor Identificado")) {
