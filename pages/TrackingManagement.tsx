@@ -387,12 +387,17 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               let prependDesc = "";
               for (let k = 1; k <= 7; k++) {
                   if (j - k >= 0) {
-                      const prevLine = blockLines[j - k].trim();
+                      let prevLine = blockLines[j - k].trim();
                       
                       // Para se encontrar outro item fechado ou cabeçalhos
-                      if (prevLine.match(itemRegex) || prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição/i)) {
+                      if (prevLine.match(itemRegex) || prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Observação|Confirmado/i)) {
                           break;
                       }
+
+                      // Limpa datas (24/03/2026), horas (17:30) e booleanos (FALSE/TRUE) que possam ter se misturado na linha
+                      prevLine = prevLine.replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '').replace(/\s+/g, ' ').trim();
+                      
+                      if (!prevLine || prevLine === '-' || prevLine === '--' || prevLine.match(/^(R\$|[\d.,]+)$/)) continue;
                       
                       // Agora aceita códigos a partir de 2 digitos (ex: código 373)
                       const prevCodeMatch = prevLine.match(/^\s*(\d{2,12})\s+(.+)/);
