@@ -93,13 +93,13 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
   useEffect(() => {
     if (order) {
       setLocalData({
-        supplierName: order.supplierName || '',
+        supplierName: order.supplierName || (order as any).name || '',
         orderNumber: order.orderNumber || '',
-        expectedDeliveryDate: order.expectedDeliveryDate || '',
+        expectedDeliveryDate: order.expectedDeliveryDate || (order as any).deliveryDeadline || '',
         cnpj: (order as any).cnpj || ''
       });
     }
-  }, [order?.id, order?.supplierName, order?.orderNumber, order?.expectedDeliveryDate, (order as any)?.cnpj]);
+  }, [order?.id, order?.supplierName, (order as any)?.name, order?.orderNumber, order?.expectedDeliveryDate, (order as any)?.deliveryDeadline, (order as any)?.cnpj]);
 
   if (!order || !localData) return null;
 
@@ -165,10 +165,10 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
               return (
                 <tr key={it?.id || `tr-${i}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors font-sans">
                   <td className="px-6 py-6 border-r border-slate-50 dark:border-slate-800">
-                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{it?.product?.codeMVSES || it?.product?.code || '---'}</div>
-                    <div className="text-[10px] text-slate-400 dark:text-slate-600 uppercase font-bold">{it?.product?.name || '---'}</div>
+                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{it?.product?.codeMVSES || it?.product?.code || it?.code || '---'}</div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-600 uppercase font-bold">{it?.product?.name || it?.description || '---'}</div>
                   </td>
-                  <td className="px-6 py-6 text-xs text-slate-500 dark:text-slate-600 font-bold uppercase text-center">{it?.product?.unit || '---'}</td>
+                  <td className="px-6 py-6 text-xs text-slate-500 dark:text-slate-600 font-bold uppercase text-center">{it?.product?.unit || it?.unit || '---'}</td>
                   <td className="px-6 py-6 text-center font-black text-slate-900 dark:text-white text-lg">{it?.orderQuantity || it?.quantity || 0}</td>
                   <td className="px-6 py-6 text-right font-bold text-slate-500 dark:text-slate-600 text-xs">R$ {(it?.product?.unitPrice || it?.unitPrice || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                   <td className="px-6 py-6 text-right font-black text-slate-900 dark:text-white text-sm bg-slate-50/30 dark:bg-white/5">R$ {((it?.orderQuantity || it?.quantity || 0) * (it?.product?.unitPrice || it?.unitPrice || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
@@ -310,39 +310,51 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       };
 
       // Split by Supplier - Identifying blocks
-      const supplierBlocks: string[] = [];
+      const supplierBlocks: string[][] = [];
       let currentBlock: string[] = [];
       
       allLines.forEach(line => {
-          if (line.match(/FORNECEDOR|EMPRESA/i) && !line.match(/Dados do Fornecedor/i)) {
-              if (currentBlock.length > 0) supplierBlocks.push(currentBlock.join('\n'));
-              currentBlock = [line];
+          const cleanLine = line.replace(/\s+/g, ' ').trim();
+          if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR[: ]/i)) {
+              if (currentBlock.length > 1) {
+                  const potentialSupplierName = currentBlock.pop()!;
+                  supplierBlocks.push(currentBlock);
+                  currentBlock = [potentialSupplierName, cleanLine];
+              } else {
+                  currentBlock.push(cleanLine);
+              }
           } else {
-              currentBlock.push(line);
+              currentBlock.push(cleanLine);
           }
       });
-      if (currentBlock.length > 0) supplierBlocks.push(currentBlock.join('\n'));
+      if (currentBlock.length > 0) supplierBlocks.push(currentBlock);
 
-      for (const block of supplierBlocks) {
-        const blockLines = block.split('\n');
-        const header = blockLines[0];
+      for (const blockLines of supplierBlocks) {
+        const fullBlock = blockLines.join('\n');
         
-        // Extract Name from header or next line
-        let name = header.replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
-        if (!name || name.length < 3) name = blockLines[1]?.split('  ')[0].trim();
+        // Extract Name from "Dados do Fornecedor" preceding line or first line
+        let name = "";
+        const dadosIdx = blockLines.findIndex(l => l.match(/Dados do Fornecedor/i));
+        if (dadosIdx > 0) {
+            name = blockLines[dadosIdx - 1].replace(/^\d+\s+/, '').trim();
+        } else {
+            name = blockLines[0].replace(/FORNECEDOR[: ]*/i, '').replace(/EMPRESA[: ]*/i, '').split('  ')[0].trim();
+            if (!name || name.length < 3) name = blockLines[1]?.split('  ')[0].trim() || "";
+        }
 
         const supplierData: any = {
           name: name || "Fornecedor Identificado",
-          cnpj: (block.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
-          orderNumber: (block.match(/OC[: ]*(\d+)/i) || block.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
-          deliveryDeadline: (block.match(/(\d+)\s*dias/i) || block.match(/Entrega[: ]*([\d/]+)/i) || ["", "---"])[1],
+          cnpj: (fullBlock.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          orderNumber: (fullBlock.match(/Ordem de Compra[: ]*(\d+)/i) || fullBlock.match(/OC[: ]*(\d+)/i) || fullBlock.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
+          deliveryDeadline: (fullBlock.match(/Prazo de entrega[: ]*([^\n]+)/i)?.[1] || fullBlock.match(/(\d+)\s*dias/i)?.[1] || fullBlock.match(/Entrega[: ]*([\d/]+)/i)?.[1] || "---").trim().replace(/Faturamento.*$/i, ''),
           totalValue: 0,
           items: []
         };
 
-        const units = ["UN", "CX", "PC", "FR", "KG", "ML", "PCT", "LT", "GL", "DZ", "PAR", "ENV", "AMP", "BIS", "GAL"];
+        const units = ["UN", "UNS", "UND", "CX", "CXS", "PC", "FR", "KG", "ML", "PCT", "PCTS", "LT", "L", "GL", "DZ", "PAR", "ENV", "AMP", "BIS", "GAL"];
         
-        for (const line of blockLines) {
+        for (let j = 0; j < blockLines.length; j++) {
+          const line = blockLines[j];
           const words = line.trim().split(/\s+/);
           // Look for units as row indicators
           const unitIdx = words.findIndex(w => units.includes(w.toUpperCase()));
@@ -351,7 +363,6 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             const unit = words[unitIdx].toUpperCase();
             
             // Pattern: [Description...] [Qty] [Unit] [Price] [Total]
-            // Qty is before Unit
             const qtyStr = words[unitIdx - 1]?.replace('.', '').replace(',', '.');
             const quantity = parseFloat(qtyStr);
             
@@ -362,8 +373,31 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               const unitPriceStr = prices[prices.length - (prices.length > 1 ? 2 : 1)].replace('.', '').replace(',', '.');
               const unitPrice = parseFloat(unitPriceStr);
               
-              const description = words.slice(0, unitIdx - 1).join(' ').replace(/^\d{4,}\s+/, '').trim();
-              const code = line.match(/^\s*(\d{4,12})\b/)?.[1] || "---";
+              const rawDesc = words.slice(0, unitIdx - 1).join(' ').trim();
+              const codeMatch = rawDesc.match(/^(\d{4,12})\s+/);
+              
+              let code = "---";
+              let description = rawDesc;
+
+              if (codeMatch) {
+                 code = codeMatch[1];
+                 description = rawDesc.replace(/^(\d{4,12})\s+/, '').trim();
+              } else {
+                 // Look at the previous line(s) for the code and main description
+                 for (let k = 1; k <= 2; k++) {
+                     if (j - k >= 0) {
+                         const prevLine = blockLines[j - k];
+                         const prevCodeMatch = prevLine.match(/^\s*(\d{4,12})\s+(.+)/);
+                         if (prevCodeMatch) {
+                             code = prevCodeMatch[1];
+                             description = `${prevCodeMatch[2]} ${description}`.trim();
+                             break;
+                         } else if (prevLine.match(/^[A-Z]/) && !prevLine.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone/i)) {
+                             description = `${prevLine} ${description}`.trim();
+                         }
+                     }
+                 }
+              }
 
               if (description.length > 2 && !isNaN(unitPrice)) {
                 supplierData.items.push({
