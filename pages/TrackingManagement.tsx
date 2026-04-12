@@ -314,10 +314,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           // Sort items on the same line by their visual X coordinates
           const lineItems = linesMap[y].sort((a, b) => (a.visualX || 0) - (b.visualX || 0));
           const lineText = lineItems.map(item => item.str).join(' ');
-          if (lineText.trim()) allLines.push({ str: lineText, y: y });
+          if (lineText.trim()) allLines.push({ str: lineText, y: y, items: lineItems });
         });
         
-        allLines.push({ str: "---PAGE_BREAK---", y: -9999 });
+        allLines.push({ str: "---PAGE_BREAK---", y: -9999, items: [] });
       }
 
       setExtractionProgress('SVA LOCAL: Analisando Estrutura...');
@@ -426,110 +426,220 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           items: []
         };
 
-        // Algoritmo de Proximidade (Centroid) para linhas órfãs
-        const anchors: { idx: number, y: number, match: any, str: string }[] = [];
-        for (let j = 0; j < blockLines.length; j++) {
-            const lineObj = blockLines[j];
-            const match = lineObj.str.match(itemRegex);
-            if (match) {
-                anchors.push({ idx: j, y: lineObj.y, match: match, str: lineObj.str });
+        // --- NOVO EXTRATOR GEOMÉTRICO (TABULAR) ---
+        let usedTabular = false;
+        let colXs: Record<string, number> = { code: -1, desc: -1, pack: -1, qty: -1, price: -1, total: -1 };
+        
+        for (const line of blockLines) {
+            if (line.str.match(/quantidade/i) && line.str.match(/valor/i) && line.items) {
+                line.items.forEach((it: any) => {
+                    const txt = it.str.toLowerCase();
+                    if (txt.includes('código') || txt.includes('informa')) colXs.code = it.visualX;
+                    else if (txt.includes('descrição') || txt.includes('descricao')) colXs.desc = it.visualX;
+                    else if (txt.includes('embalagem')) colXs.pack = it.visualX;
+                    else if (txt.includes('quantidade')) colXs.qty = it.visualX;
+                    else if ((txt.includes('unitário') || txt.includes('unitario')) && colXs.price === -1) colXs.price = it.visualX;
+                    else if (txt.includes('total')) colXs.total = it.visualX;
+                });
+                break;
             }
         }
 
-        for (let i = 0; i < anchors.length; i++) {
-            const anchor = anchors[i];
-            const startLimit = i === 0 ? 0 : anchors[i-1].idx + 1;
-            const endLimit = i === anchors.length - 1 ? blockLines.length - 1 : anchors[i+1].idx - 1;
-            
-            const myBlockStrings: string[] = [];
-            
-            for (let k = startLimit; k <= endLimit; k++) {
-                const orphan = blockLines[k];
-                if (k === anchor.idx) {
-                    myBlockStrings.push(orphan.str);
-                    continue;
-                }
+        // Se localizou as coordenadas chave, utiliza extração geométrica
+        if (colXs.qty !== -1 && colXs.price !== -1) {
+            usedTabular = true;
+            let activeItem: any = null;
+
+            // Ordena as colunas por X para definir intervalos (boundaries)
+            const sortedEntries = Object.entries(colXs).filter(e => e[1] !== -1).sort((a, b) => a[1] - b[1]);
+
+            for (const line of blockLines) {
+                if (line.str.trim() === "---PAGE_BREAK---") continue;
+                if (line.str.match(/quantidade/i) && line.str.match(/valor/i)) continue;
+                if (!line.items || line.items.length === 0) continue;
                 
-                // Omitir o nome do fornecedor (primeira linha) para que não seja pego pelo primeiro item
-                if (k === 0) continue; 
+                if (line.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL:|SUBTOTAL|I\.E\.|Telefone|Email|Local de Entrega/i) && line.items.length < 5) continue;
+                if (line.str.match(/^[-\s]*$/)) continue;
 
-                // Ignorar estruturas do relatorio
-                if (orphan.str.trim() === "---PAGE_BREAK---") continue;
-                if (orphan.str.match(/HTTPS?:\/\//i) || orphan.str.match(/P[AÁ]G\.\s*\d+/i)) continue;
-                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) continue;
-                if (orphan.str.match(/^[-\s]*$/)) continue;
+                const lineCols: Record<string, string[]> = { code: [], desc: [], pack: [], qty: [], price: [], total: [] };
 
-                const distToMe = Math.abs(orphan.y - anchor.y);
-                let closestIsMe = true;
-
-                if (i > 0 && k < anchor.idx) {
-                    const distToPrev = Math.abs(orphan.y - anchors[i-1].y);
-                    if (distToPrev < distToMe) closestIsMe = false;
-                }
-                if (i < anchors.length - 1 && k > anchor.idx) {
-                    const distToNext = Math.abs(orphan.y - anchors[i+1].y);
-                    if (distToNext < distToMe) closestIsMe = false;
-                }
-
-                if (closestIsMe) {
-                    myBlockStrings.push(orphan.str);
-                }
-            }
-
-            // Agora processamos apenas o conteudo que comprovadamente pertence a este item
-            let descriptionText = "";
-            let code = "---";
-            
-            // Dados da âncora (Qtd / Preco)
-            const qtyStr = anchor.match[2];
-            const unitPriceStr = anchor.match[4];
-            const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
-            const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
-            const unit = anchor.match[3] ? anchor.match[3].toUpperCase() : 'UN';
-
-            for (const str of myBlockStrings) {
-                let cleanStr = str;
-                if (str === anchor.str) {
-                    cleanStr = anchor.match[1].trim(); // Pega apenas a porção descritiva na linha âncora antes da qtd
-                }
-                
-                const cMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s+/);
-                const isoMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s*$/);
-                if (cMatch && code === "---") code = cMatch[1];
-                else if (isoMatch && code === "---") code = isoMatch[1];
-
-                descriptionText += " " + cleanStr;
-            }
-
-            let description = descriptionText
-                  .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
-                  .replace(/\b(?:MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
-                  .replace(/\b(?:SUPERMÉDICA|SUPERMEDICA|SUPER MEDICA)\b/gi, '')
-                  .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
-                  .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
-                  .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
-                  .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
-                  .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.\-\s]+(?:\.[A-Z]{2,})+\b/gi, '')
-                  .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
-                  .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
-                  .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
-                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA|CSL\s+BEHRING|GEOLAB|FARMACE|CIMED|UNIAO\s+QUIMICA|MYLAN\/VIATRIS|CRISTÁLIA|CRISTALIA|SANTISA|EQUIPLEX|CSL)\b/gi, '')
-                  .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial|PROD\.?)(?=\s|$|\W)/gi, '')
-                  .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
-                  .replace(/\s+/g, ' ')
-                  .replace(/^[-\s]+|[-\s]+$/g, '')
-                  .replace(/^\d{1,4}\s+/, '');
-
-            if (description.length > 2 && !isNaN(quantity) && !isNaN(unitPrice)) {
-                supplierData.items.push({
-                  code: code,
-                  description: description,
-                  quantity: quantity,
-                  unitPrice: unitPrice,
-                  unit: unit,
-                  totalValue: quantity * unitPrice
+                // Classifica cada pedacinho visual pelo X da coluna
+                line.items.forEach((it: any) => {
+                    if (it.str.trim() === '') return;
+                    let matchedKey = sortedEntries[0][0];
+                    for (let i = 0; i < sortedEntries.length; i++) {
+                        const colLeftBoundary = sortedEntries[i][1] - 30; // Margem
+                        if (it.visualX >= colLeftBoundary) {
+                            matchedKey = sortedEntries[i][0];
+                        }
+                    }
+                    lineCols[matchedKey].push(it.str);
                 });
-                supplierData.totalValue += (quantity * unitPrice);
+
+                const cText = lineCols.code.join(' ').trim();
+                const dText = lineCols.desc.join(' ').trim();
+                const qText = lineCols.qty.join(' ').trim();
+                const prText = lineCols.price.join(' ').trim();
+
+                // Se houver um código limpo marcando um novo produto (ou quantidade numérica evidente em nova linha isolada)
+                const isNewItem = (colXs.code !== -1 && cText.match(/^\d{2,15}$/)) || (dText.match(/^[A-Z]{3,}/i) && qText.match(/^\d+/) && prText.match(/^(?:R\$)?\s*[\d.,]+/i));
+
+                if (isNewItem) {
+                    if (activeItem) {
+                        finalizeAndPushGeomItem(activeItem, supplierData);
+                    }
+                    activeItem = { code: cText, desc: dText, pack: lineCols.pack.join(' '), qty: qText, price: prText, total: lineCols.total.join(' ') };
+                } else if (activeItem) {
+                    // Accumulate continuations (wrap broken lines)
+                    if (cText) activeItem.code += " " + cText;
+                    if (dText) activeItem.desc += " " + dText;
+                    if (lineCols.pack.length) activeItem.pack += " " + lineCols.pack.join(' ');
+                    if (qText) activeItem.qty += " " + qText;
+                    if (prText) activeItem.price += " " + prText;
+                    if (lineCols.total.length) activeItem.total += " " + lineCols.total.join(' ');
+                }
+            }
+            if (activeItem) finalizeAndPushGeomItem(activeItem, supplierData);
+        }
+
+        function finalizeAndPushGeomItem(item: any, sup: any) {
+            let cleanDesc = item.desc
+                .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE|SUPERMÉDICA|MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
+                .replace(/\b(?:Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
+                .replace(/\s+/g, ' ').trim();
+
+            const cQtyStr = item.qty.replace(/[^\d.,]/g, '');
+            let quantity = parseFloat(cQtyStr.replace('.', '').replace(',', '.'));
+            
+            // O PDF PODE picotar "R$ 100,50" em ["R$", "100,50"] ou pior ["100,", "50"]
+            // Precisamos limpar e juntar o dinheiro de formatação quebrada
+            const cPriceStr = item.price.replace(/[^\d.,]/g, '');
+            let unitPrice = 0;
+            if (cPriceStr) {
+                // Remove ponto de milhar se houver virgula depois e junta. Ex: 1.496,06 -> 1496.06
+                let normalizedPr = cPriceStr;
+                if (normalizedPr.includes(',')) {
+                    normalizedPr = normalizedPr.replace(/\./g, '').replace(',', '.');
+                }
+                unitPrice = parseFloat(normalizedPr);
+            }
+
+            // Unidade padrão ou tentar arrancar do final da qty/pack
+            let unit = item.pack.trim() || 'UN';
+            if (!item.pack.trim() && item.qty.match(/[A-Za-z]{2,}/)) {
+                const untMatch = item.qty.match(/([A-Z]{2,}(?:[-\/]\w+)?)/i);
+                if (untMatch) unit = untMatch[1].toUpperCase();
+            }
+            if (unit.length > 15) unit = 'UN'; // Evita strings monstro
+
+            if (cleanDesc.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
+                sup.items.push({
+                    code: item.code.trim() || "---",
+                    description: cleanDesc,
+                    quantity: quantity,
+                    unitPrice: unitPrice,
+                    unit: unit,
+                    totalValue: quantity * unitPrice
+                });
+                sup.totalValue += (quantity * unitPrice);
+            }
+        }
+
+        // --- BACKUP: ALGORITMO ORIGINAL (Caso o cabeçalho não tenha as posições geométricas no PDF) ---
+        if (!usedTabular) {
+            const anchors: { idx: number, y: number, match: any, str: string }[] = [];
+            for (let j = 0; j < blockLines.length; j++) {
+                const lineObj = blockLines[j];
+                const match = lineObj.str.match(itemRegex);
+                if (match) {
+                    anchors.push({ idx: j, y: lineObj.y, match: match, str: lineObj.str });
+                }
+            }
+
+            for (let i = 0; i < anchors.length; i++) {
+                const anchor = anchors[i];
+                const startLimit = i === 0 ? 0 : anchors[i-1].idx + 1;
+                const endLimit = i === anchors.length - 1 ? blockLines.length - 1 : anchors[i+1].idx - 1;
+                
+                const myBlockStrings: string[] = [];
+                
+                for (let k = startLimit; k <= endLimit; k++) {
+                    const orphan = blockLines[k];
+                    if (k === anchor.idx) {
+                        myBlockStrings.push(orphan.str);
+                        continue;
+                    }
+                    if (k === 0) continue; 
+                    if (orphan.str.trim() === "---PAGE_BREAK---") continue;
+                    if (orphan.str.match(/HTTPS?:\/\//i) || orphan.str.match(/P[AÁ]G\.\s*\d+/i)) continue;
+                    if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) continue;
+                    if (orphan.str.match(/^[-\s]*$/)) continue;
+
+                    const distToMe = Math.abs(orphan.y - anchor.y);
+                    let closestIsMe = true;
+
+                    if (i > 0 && k < anchor.idx) {
+                        const distToPrev = Math.abs(orphan.y - anchors[i-1].y);
+                        if (distToPrev < distToMe) closestIsMe = false;
+                    }
+                    if (i < anchors.length - 1 && k > anchor.idx) {
+                        const distToNext = Math.abs(orphan.y - anchors[i+1].y);
+                        if (distToNext < distToMe) closestIsMe = false;
+                    }
+
+                    if (closestIsMe) {
+                        myBlockStrings.push(orphan.str);
+                    }
+                }
+
+                let descriptionText = "";
+                let code = "---";
+                
+                const qtyStr = anchor.match[2];
+                const unitPriceStr = anchor.match[4];
+                const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
+                const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
+                const unit = anchor.match[3] ? anchor.match[3].toUpperCase() : 'UN';
+
+                for (const str of myBlockStrings) {
+                    let cleanStr = str;
+                    if (str === anchor.str) {
+                        cleanStr = anchor.match[1].trim();
+                    }
+                    const cMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s+/);
+                    const isoMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s*$/);
+                    if (cMatch && code === "---") code = cMatch[1];
+                    else if (isoMatch && code === "---") code = isoMatch[1];
+                    descriptionText += " " + cleanStr;
+                }
+
+                let description = descriptionText
+                      .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE|MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
+                      .replace(/\b(?:SUPERMÉDICA|SUPERMEDICA|SUPER MEDICA)\b/gi, '')
+                      .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
+                      .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
+                      .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
+                      .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
+                      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.\-\s]+(?:\.[A-Z]{2,})+\b/gi, '')
+                      .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
+                      .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
+                      .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
+                      .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA|CSL\s+BEHRING|GEOLAB|FARMACE|CIMED|UNIAO\s+QUIMICA|MYLAN\/VIATRIS|CRISTÁLIA|CRISTALIA|SANTISA|EQUIPLEX|CSL)\b/gi, '')
+                      .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial|PROD\.?)(?=\s|$|\W)/gi, '')
+                      .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
+                      .replace(/\s+/g, ' ').replace(/^[-\s]+|[-\s]+$/g, '').replace(/^\d{1,4}\s+/, '');
+
+                if (description.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
+                    supplierData.items.push({
+                      code: code,
+                      description: description,
+                      quantity: quantity,
+                      unitPrice: unitPrice,
+                      unit: unit,
+                      totalValue: quantity * unitPrice
+                    });
+                    supplierData.totalValue += (quantity * unitPrice);
+                }
             }
         }
 
