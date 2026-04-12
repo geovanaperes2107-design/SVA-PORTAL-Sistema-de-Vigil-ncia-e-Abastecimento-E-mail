@@ -328,7 +328,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         suppliers: []
       };
 
-      const itemRegex = /(.*?)\s*(\d+(?:[.,]\d+)?)\s*([A-Z]{2,}(?:[-\/]\w+)?|UN|CX|PC|KG|FR|AMP|L|LT|DZ|GAL|RL|MGS?|COMPS?|FRS?)\s*(?:R\$?\s*)?([\d.,]+)\s*(?:R\$?\s*)?([\d.,]+)?/i;
+      const itemRegex = /(.*?)\s*(\d+(?:[.,]\d+)?)\s*([A-Z]{2,}(?:[-\/]\w+)?|UN|CX|PC|KG|FR|AMP|L|LT|DZ|GAL|RL|MGS?|COMPS?|FRS?)?\s*(?:R\$?\s*)?([\d.,]+)\s*(?:R\$?\s*)?([\d.,]+)?/i;
 
       // Split by Supplier - Identifying blocks
       const supplierBlocks: any[][] = [];
@@ -343,7 +343,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           let keepPreviousLine = false;
 
           // Separador Clássico
-          if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR[: ]/i)) {
+          if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR\b/i)) {
               isNewBlock = true;
               keepPreviousLine = true;
           } 
@@ -405,11 +405,11 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         }
 
         // Se a primeira linha for literalmente só "Dados do fornecedor" ou vazia, tenta o fallback
-        if (!name || name.length < 3 || name.match(/Dados do Fornecedor|FORNECEDOR[:]/i)) {
-            const nameMatch = fullBlockStr.match(/FORNECEDOR[: ]*([^@\n]+)(?:@|\n|$)/i) || fullBlockStr.match(/EMPRESA[: ]*([^@\n]+)/i);
-            if (nameMatch) {
+        if (!name || name.length < 3 || name.match(/Dados do Fornecedor|FORNECEDOR\b/i)) {
+            const nameMatch = fullBlockStr.match(/FORNECEDOR[: \n]*([^@\n\r]+)/i) || fullBlockStr.match(/EMPRESA[: \n]*([^@\n\r]+)/i);
+            if (nameMatch && !nameMatch[1].match(/cnpj/i)) {
                 name = nameMatch[1].split('CNPJ')[0].trim();
-            } else if (blockLines[1] && !blockLines[1].str.match(/Dados do Fornecedor/i)) {
+            } else if (blockLines[1] && !blockLines[1].str.match(/Dados do Fornecedor|FORNECEDOR/i)) {
                 name = blockLines[1].str.split('  ')[0].trim();
             }
         }
@@ -485,7 +485,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             const unitPriceStr = anchor.match[4];
             const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
             const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
-            const unit = anchor.match[3].toUpperCase();
+            const unit = anchor.match[3] ? anchor.match[3].toUpperCase() : 'UN';
 
             for (const str of myBlockStrings) {
                 let cleanStr = str;
