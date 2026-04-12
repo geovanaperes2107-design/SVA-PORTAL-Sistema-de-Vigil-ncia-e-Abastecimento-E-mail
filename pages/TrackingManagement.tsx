@@ -348,15 +348,21 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
               keepPreviousLine = true;
           } 
           // Separador Numérico (ex: "01", "02") seguido de nome e CNPJ
-          else if (cleanLine.match(/^\d{1,2}$/) && currentBlock.length > 2) {
-              let foundCnpj = false;
-              for (let k = 1; k <= 5; k++) {
-                  if (allLines[i+k] && allLines[i+k].str.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/)) {
-                      foundCnpj = true;
+          else if (currentBlock.length > 5) {
+              let nextCnpjIndex = -1;
+              for (let k = 1; k <= 3; k++) {
+                  if (allLines[i+k] && allLines[i+k].str.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) && !allLines[i+k].str.match(/Faturamento/i)) {
+                      nextCnpjIndex = k;
                       break;
                   }
               }
-              if (foundCnpj) isNewBlock = true;
+              // Se há um CNPJ logo abaixo (k=1, k=2), a linha atual ou a próxima formam o cabeçalho.
+              // Vamos cortar o bloco na linha imediatamente anterior ou na numeração.
+              if (nextCnpjIndex !== -1) {
+                  if (nextCnpjIndex === 1 || cleanLine.match(/^\d{1,2}(\s|$)/)) {
+                      isNewBlock = true;
+                  }
+              }
           }
 
           if (isNewBlock) {
