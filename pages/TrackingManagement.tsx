@@ -280,20 +280,39 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         
         // Group items by Y coordinate (transform[5])
         const items = textContent.items as any[];
-        const linesMap: { [y: number]: any[] } = {};
+        const linesMap: { [y: string]: any[] } = {};
         
         items.forEach(item => {
-          const y = parseFloat(item.transform[5].toFixed(2));
-          if (!linesMap[y]) linesMap[y] = [];
-          linesMap[y].push(item);
+          // Identify if text is rotated 90 or 270 degrees
+          const isRotated = Math.abs(item.transform[1]) > Math.abs(item.transform[0]);
+          let visualY = item.transform[5];
+          let visualX = item.transform[4];
+          
+          if (isRotated) {
+             visualY = item.transform[4];
+             visualX = item.transform[5];
+          }
+          
+          item.visualX = visualX;
+
+          const keys = Object.keys(linesMap);
+          let foundKey = keys.find(k => Math.abs(parseFloat(k) - visualY) < 5.0);
+          
+          if (foundKey) {
+            linesMap[foundKey].push(item);
+          } else {
+            linesMap[visualY.toFixed(2)] = [item];
+          }
         });
 
-        // Sort Y coordinates descending (top to bottom)
+        // Sort Y coordinates
+        // Try to handle descending or ascending based on rotation direction?
+        // Let's just sort descending for Y by default.
         const sortedYs = Object.keys(linesMap).map(Number).sort((a, b) => b - a);
         
         sortedYs.forEach(y => {
-          // Sort items on the same line by X coordinate (transform[4])
-          const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
+          // Sort items on the same line by their visual X coordinates
+          const lineItems = linesMap[y].sort((a, b) => (a.visualX || 0) - (b.visualX || 0));
           const lineText = lineItems.map(item => item.str).join(' ');
           if (lineText.trim()) allLines.push({ str: lineText, y: y });
         });
@@ -309,7 +328,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         suppliers: []
       };
 
-      const itemRegex = /(.*?)\s+(\d+(?:[.,]\d+)?)\s+(UNS|UND|UN|CXS|CX|PCTS|PCT|LTS|LT|L|GL|PCS|PC|KG|FR|DZ|PAR|ENV|AMP|BIS|GAL|RLS|RL)\s+(?:R\$?\s*)?([\d.,]+)\s+(?:R\$?\s*)?([\d.,]+)?/i;
+      const itemRegex = /(.*?)\s*(\d+(?:[.,]\d+)?)\s*([A-Z]{2,}(?:[-\/]\w+)?|UN|CX|PC|KG|FR|AMP|L|LT|DZ|GAL|RL|MGS?|COMPS?|FRS?)\s*(?:R\$?\s*)?([\d.,]+)\s*(?:R\$?\s*)?([\d.,]+)?/i;
 
       // Split by Supplier - Identifying blocks
       const supplierBlocks: any[][] = [];
@@ -340,19 +359,37 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         
         let name = blockLines[0].str.split('  ')[0].trim();
         
+        if (name.match(/RELATÓRIO|CONFIRMADOS|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
+             let idx = 1;
+             while (idx < blockLines.length && blockLines[idx].str.match(/RELATÓRIO|CONFIRMADOS|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
+                 idx++;
+             }
+             if (idx < blockLines.length) {
+                 name = blockLines[idx].str.split('  ')[0].trim();
+                 if (name.match(/^\d{1,2}$/) && blockLines.length > idx + 1) {
+                     name = blockLines[idx+1].str.split('  ')[0].trim();
+                 }
+             }
+        } else if (name.match(/^\d{1,2}$/) && blockLines.length > 1) {
+            name = blockLines[1].str.split('  ')[0].trim();
+        }
+
         // Se a primeira linha for literalmente só "Dados do fornecedor" ou vazia, tenta o fallback
         if (!name || name.length < 3 || name.match(/Dados do Fornecedor|FORNECEDOR[:]/i)) {
             const nameMatch = fullBlockStr.match(/FORNECEDOR[: ]*([^@\n]+)(?:@|\n|$)/i) || fullBlockStr.match(/EMPRESA[: ]*([^@\n]+)/i);
             if (nameMatch) {
                 name = nameMatch[1].split('CNPJ')[0].trim();
-            } else if (blockLines[1]) {
+            } else if (blockLines[1] && !blockLines[1].str.match(/Dados do Fornecedor/i)) {
                 name = blockLines[1].str.split('  ')[0].trim();
             }
         }
 
+        const allCnpjs = fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || [""];
+        const correctCnpj = allCnpjs.length > 1 ? allCnpjs[allCnpjs.length - 1] : allCnpjs[0];
+
         const supplierData: any = {
           name: name || "Fornecedor Identificado",
-          cnpj: (fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
+          cnpj: correctCnpj,
           orderNumber: (fullBlockStr.match(/Ordem de Compra[: ]*(\d+)/i) || fullBlockStr.match(/OC[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
           deliveryDeadline: (fullBlockStr.match(/Prazo de entrega[: ]*([^\n]+)/i)?.[1] || fullBlockStr.match(/(\d+)\s*dias/i)?.[1] || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i)?.[1] || "---").trim().replace(/Faturamento.*$/i, ''),
           totalValue: 0,
@@ -389,7 +426,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                 // Ignorar estruturas do relatorio
                 if (orphan.str.trim() === "---PAGE_BREAK---") continue;
                 if (orphan.str.match(/HTTPS?:\/\//i) || orphan.str.match(/P[AÁ]G\.\s*\d+/i)) continue;
-                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Painel|Acompanhamento|Log[ií]stico|SVA/i)) continue;
+                if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) continue;
                 if (orphan.str.match(/^[-\s]*$/)) continue;
 
                 const distToMe = Math.abs(orphan.y - anchor.y);
@@ -435,15 +472,18 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
             }
 
             let description = descriptionText
+                  .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
+                  .replace(/\b(?:MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
+                  .replace(/\b(?:SUPERMÉDICA|SUPERMEDICA|SUPER MEDICA)\b/gi, '')
                   .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
                   .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
                   .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
-                  .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
+                  .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
                   .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.\-\s]+(?:\.[A-Z]{2,})+\b/gi, '')
                   .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
                   .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
                   .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
-                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA)\b/gi, '')
+                  .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA|CSL\s+BEHRING|GEOLAB|FARMACE|CIMED|UNIAO\s+QUIMICA|MYLAN\/VIATRIS|CRISTÁLIA|CRISTALIA|SANTISA|EQUIPLEX|CSL)\b/gi, '')
                   .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial|PROD\.?)(?=\s|$|\W)/gi, '')
                   .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
                   .replace(/\s+/g, ' ')
