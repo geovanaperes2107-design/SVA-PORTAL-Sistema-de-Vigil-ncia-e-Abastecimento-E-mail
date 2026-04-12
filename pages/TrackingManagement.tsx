@@ -334,24 +334,48 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       const supplierBlocks: any[][] = [];
       let currentBlock: any[] = [];
       
-      allLines.forEach(lineObj => {
-          if (lineObj.str.trim() === "---PAGE_BREAK---") {
-              // Ignore page breaks for supplier blocking
-              return;
-          }
+      for (let i = 0; i < allLines.length; i++) {
+          const lineObj = allLines[i];
+          if (lineObj.str.trim() === "---PAGE_BREAK---") continue;
+          
           const cleanLine = lineObj.str.replace(/\s+/g, ' ').trim();
+          let isNewBlock = false;
+          let keepPreviousLine = false;
+
+          // Separador Clássico
           if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR[: ]/i)) {
+              isNewBlock = true;
+              keepPreviousLine = true;
+          } 
+          // Separador Numérico (ex: "01", "02") seguido de nome e CNPJ
+          else if (cleanLine.match(/^\d{1,2}$/) && currentBlock.length > 2) {
+              let foundCnpj = false;
+              for (let k = 1; k <= 5; k++) {
+                  if (allLines[i+k] && allLines[i+k].str.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/)) {
+                      foundCnpj = true;
+                      break;
+                  }
+              }
+              if (foundCnpj) isNewBlock = true;
+          }
+
+          if (isNewBlock) {
               if (currentBlock.length > 1) {
-                  const potentialSupplierName = currentBlock.pop()!;
-                  supplierBlocks.push(currentBlock);
-                  currentBlock = [potentialSupplierName, lineObj];
+                  if (keepPreviousLine) {
+                      const potentialSupplierName = currentBlock.pop()!;
+                      supplierBlocks.push(currentBlock);
+                      currentBlock = [potentialSupplierName, lineObj];
+                  } else {
+                      supplierBlocks.push(currentBlock);
+                      currentBlock = [lineObj];
+                  }
               } else {
                   currentBlock.push(lineObj);
               }
           } else {
               currentBlock.push(lineObj);
           }
-      });
+      }
       if (currentBlock.length > 0) supplierBlocks.push(currentBlock);
 
       for (const blockLines of supplierBlocks) {
