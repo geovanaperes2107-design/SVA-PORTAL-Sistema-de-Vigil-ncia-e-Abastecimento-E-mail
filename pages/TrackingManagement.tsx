@@ -202,10 +202,10 @@ const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, is
       <span className="material-symbols-outlined text-5xl font-black">{isExtracting ? 'sync' : 'upload_file'}</span>
     </div>
     <div className="text-center space-y-2">
-      <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">{isExtracting ? 'PROCESSANDO DOCUMENTO...' : 'CLIQUE OU ARRASTE O PDF AQUI'}</h4>
-      <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Extração Inteligente: Processo - Fornecedor - Itens</p>
+      <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">{isExtracting ? 'PROCESSANDO DOCUMENTO...' : 'CLIQUE OU ARRASTE SEU ARQUIVO AQUI'}</h4>
+      <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Suporta: PDF, Foto / Imagem (PNG/JPG) ou Planilha Excel (.xlsx, .xls, .csv)</p>
     </div>
-    <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={e => {
+    <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv" onChange={e => {
       const file = e.target.files?.[0];
       if (file) onExtract(file);
     }} disabled={isExtracting} />
@@ -778,11 +778,163 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
     }
   };
 
+  const excelExtract = async (file: File) => {
+    setIsExtracting(true);
+    setWizardStep('upload');
+    setExtractionProgress('SVA EXCEL: Lendo dados da planilha...');
+    try {
+      const attachmentUrl = await uploadAttachment(file);
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      if (!rows || rows.length === 0) {
+        throw new Error("A planilha Excel está vazia.");
+      }
+
+      setExtractionProgress('SVA EXCEL: Mapeando colunas e itens...');
+
+      let supplierName = "Fornecedor Identificado";
+      let cnpj = "";
+      let orderNumber = "";
+      let deliveryDeadline = "---";
+      let quotationNumber = (file.name.match(/\d+/) || ["0000"])[0];
+
+      // Tentar encontrar metadados nas primeiras 15 linhas
+      for (let r = 0; r < Math.min(15, rows.length); r++) {
+        const rowText = (rows[r] || []).map(cell => String(cell || '')).join(' ');
+        if (!rowText) continue;
+
+        const cnpjMatch = rowText.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+        if (cnpjMatch && !cnpj) cnpj = cnpjMatch[0];
+
+        const ocMatch = rowText.match(/(?:Cód\.?\s*Ordem de Compra|Cód\.?\s*OC|Ordem de Compra|OC|O\.C\.|Pedido)[: ]*(\d+)/i);
+        if (ocMatch && !orderNumber) orderNumber = ocMatch[1];
+
+        const deadlineMatch = rowText.match(/(?:Prazo de Entrega|Prazo)[: ]*([^\n]+)/i);
+        if (deadlineMatch && deliveryDeadline === "---") deliveryDeadline = deadlineMatch[1].trim();
+
+        const supMatch = rowText.match(/(?:Fornecedor|Empresa|Razão Social)[: ]*([^\n]+)/i);
+        if (supMatch && supplierName === "Fornecedor Identificado") supplierName = supMatch[1].trim();
+      }
+
+      // Localizar linha de cabeçalho das colunas
+      let headerRowIdx = -1;
+      let colIndices = { code: -1, desc: -1, qty: -1, price: -1, total: -1, unit: -1 };
+
+      for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row) continue;
+
+        row.forEach((cell: any, cIdx: number) => {
+          const txt = String(cell || '').toLowerCase().trim();
+          if ((txt.includes('código') || txt.includes('codigo') || txt.includes('cod') || txt.includes('informa')) && colIndices.code === -1) colIndices.code = cIdx;
+          if ((txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('item')) && colIndices.desc === -1) colIndices.desc = cIdx;
+          if ((txt.includes('quantidade') || txt.includes('qtd') || txt.includes('quant')) && colIndices.qty === -1) colIndices.qty = cIdx;
+          if ((txt.includes('unitário') || txt.includes('unitario') || txt.includes('preço') || txt.includes('preco') || txt.includes('vl. unit')) && colIndices.price === -1) colIndices.price = cIdx;
+          if ((txt.includes('total') || txt.includes('subtotal')) && colIndices.total === -1) colIndices.total = cIdx;
+          if ((txt.includes('embalagem') || txt.includes('unidade') || txt.includes('unid') || txt.includes('emb')) && colIndices.unit === -1) colIndices.unit = cIdx;
+        });
+
+        if (colIndices.qty !== -1 && (colIndices.desc !== -1 || colIndices.code !== -1)) {
+          headerRowIdx = r;
+          break;
+        }
+      }
+
+      const items: any[] = [];
+      const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 0;
+
+      for (let r = startRow; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+
+        let code = colIndices.code !== -1 ? String(row[colIndices.code] || '').trim() : '---';
+        let desc = colIndices.desc !== -1 ? String(row[colIndices.desc] || '').trim() : '';
+        let rawQty = colIndices.qty !== -1 ? String(row[colIndices.qty] || '') : '';
+        let rawPrice = colIndices.price !== -1 ? String(row[colIndices.price] || '') : '';
+        let rawTotal = colIndices.total !== -1 ? String(row[colIndices.total] || '') : '';
+        let unit = colIndices.unit !== -1 ? String(row[colIndices.unit] || '').trim() : 'UN';
+
+        // Se não encontrou colunas explícitas pelo cabeçalho, tenta posições clássicas (0: desc/código, 1: qty, 2: preço)
+        if (headerRowIdx === -1 && row.length >= 3) {
+          desc = String(row[0] || '').trim();
+          rawQty = String(row[1] || '');
+          rawPrice = String(row[2] || '');
+          if (row[3]) rawTotal = String(row[3]);
+        }
+
+        const qtyLeadingMatch = rawQty.trim().match(/^\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,\d+)?/);
+        let quantity = qtyLeadingMatch ? parseFloat(qtyLeadingMatch[0].replace(/\./g, '').replace(',', '.')) : parseFloat(rawQty.replace(/[^\d.,]/g, '').replace('.', '').replace(',', '.'));
+
+        const priceClean = rawPrice.replace(/[^\d.,]/g, '');
+        let unitPrice = priceClean.includes(',') ? parseFloat(priceClean.replace(/\./g, '').replace(',', '.')) : parseFloat(priceClean);
+
+        const totalClean = rawTotal.replace(/[^\d.,]/g, '');
+        let totalValue = totalClean.includes(',') ? parseFloat(totalClean.replace(/\./g, '').replace(',', '.')) : parseFloat(totalClean);
+        if (!totalValue || isNaN(totalValue)) totalValue = quantity * unitPrice;
+
+        if (desc.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
+          items.push({
+            code: code || "---",
+            description: desc,
+            quantity: quantity,
+            unitPrice: unitPrice,
+            unit: unit || 'UN',
+            totalValue: totalValue
+          });
+        }
+      }
+
+      if (items.length === 0) {
+        throw new Error("Não foi possível identificar linhas de produtos válidas na planilha.");
+      }
+
+      const result = {
+        quotationNumber: quotationNumber,
+        suppliers: [
+          {
+            name: supplierName,
+            cnpj: cnpj,
+            orderNumber: orderNumber,
+            deliveryDeadline: deliveryDeadline,
+            attachmentUrl: attachmentUrl,
+            totalValue: items.reduce((acc, i) => acc + i.totalValue, 0),
+            items: items
+          }
+        ],
+        attachmentUrl: attachmentUrl
+      };
+
+      setExtractionResult(result);
+      setWizardStep('verify');
+    } catch (err: any) {
+      console.error("Erro na extração Excel:", err);
+      alert("Erro na Extração de Excel/Planilha: " + (err.message || "Verifique a planilha enviada."));
+    } finally {
+      setIsExtracting(false);
+      setExtractionProgress('');
+    }
+  };
+
   const handleExtract = (file: File) => {
-    if (extractionMode === 'ai') {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isExcel = ['xlsx', 'xls', 'csv'].includes(ext);
+    const isImage = ['png', 'jpg', 'jpeg', 'webp'].includes(ext) || file.type.startsWith('image/');
+
+    if (isExcel) {
+      excelExtract(file);
+    } else if (isImage) {
       professionalExtract(file);
     } else {
-      localExtract(file);
+      if (extractionMode === 'ai') {
+        professionalExtract(file);
+      } else {
+        localExtract(file);
+      }
     }
   };
 
