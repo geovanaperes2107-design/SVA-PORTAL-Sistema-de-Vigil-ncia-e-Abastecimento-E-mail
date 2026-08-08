@@ -435,17 +435,24 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         let colXs: Record<string, number> = { code: -1, desc: -1, pack: -1, qty: -1, price: -1, total: -1 };
         
         for (const line of blockLines) {
-            if (line.str.match(/quantidade/i) && line.str.match(/valor/i) && line.items) {
-                line.items.forEach((it: any) => {
-                    const txt = it.str.toLowerCase();
-                    if (txt.includes('código') || txt.includes('informa')) colXs.code = it.visualX;
-                    else if (txt.includes('descrição') || txt.includes('descricao')) colXs.desc = it.visualX;
-                    else if (txt.includes('embalagem')) colXs.pack = it.visualX;
-                    else if (txt.includes('quantidade')) colXs.qty = it.visualX;
-                    else if ((txt.includes('unitário') || txt.includes('unitario')) && colXs.price === -1) colXs.price = it.visualX;
-                    else if (txt.includes('total')) colXs.total = it.visualX;
-                });
-                break;
+            const txtLine = line.str.toLowerCase();
+            const hasQtyWord = txtLine.match(/quantidade|qtd|quant|qnt/);
+            const hasPriceWord = txtLine.match(/valor|preço|preco|vl|unit|total|subtotal/);
+            const hasDescWord = txtLine.match(/descriç|descricao|produto|item|código|codigo/);
+
+            if ((hasQtyWord && hasPriceWord) || (hasDescWord && (hasQtyWord || hasPriceWord))) {
+                if (line.items) {
+                    line.items.forEach((it: any) => {
+                        const txt = it.str.toLowerCase().trim();
+                        if ((txt.includes('código') || txt.includes('codigo') || txt.includes('cod.') || txt.includes('informa') || txt.includes('item')) && colXs.code === -1) colXs.code = it.visualX;
+                        else if ((txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('especifica')) && colXs.desc === -1) colXs.desc = it.visualX;
+                        else if ((txt.includes('embalagem') || txt.includes('unid') || txt.includes('un.') || txt.includes('emb.')) && colXs.pack === -1) colXs.pack = it.visualX;
+                        else if ((txt.includes('quantidade') || txt.includes('qtd') || txt.includes('quant') || txt.includes('qnt')) && colXs.qty === -1) colXs.qty = it.visualX;
+                        else if ((txt.includes('unitário') || txt.includes('unitario') || txt.includes('unit') || txt.includes('preço') || txt.includes('preco') || txt.includes('vl.')) && colXs.price === -1) colXs.price = it.visualX;
+                        else if ((txt.includes('total') || txt.includes('subtotal')) && colXs.total === -1) colXs.total = it.visualX;
+                    });
+                }
+                if (colXs.qty !== -1 || colXs.price !== -1) break;
             }
         }
 
@@ -652,8 +659,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         }
       }
 
-      if (result.suppliers.length === 0) {
-        throw new Error("Não foi possível detectar fornecedores e itens. Verifique se o PDF tem texto selecionável ou use a Extração de IA.");
+      if (result.suppliers.length === 0 || !result.suppliers.some((s: any) => s.items && s.items.length > 0)) {
+        console.info("Extração local não encontrou texto selecionável. Redirecionando para IA Avançada (SVA IA)...");
+        setExtractionProgress('Texto não selecionável detectado. Redirecionando para SVA IA...');
+        return await professionalExtract(file);
       }
 
       if (attachmentUrl) {
