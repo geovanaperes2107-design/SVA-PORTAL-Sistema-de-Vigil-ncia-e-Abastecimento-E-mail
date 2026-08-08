@@ -273,8 +273,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
       
       let allLines: any[] = [];
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
+      const startPage = pdf.numPages > 1 ? 2 : 1;
+
+      for (let i = startPage; i <= pdf.numPages; i++) {
+        setExtractionProgress(`Processando página ${i} de ${pdf.numPages}${pdf.numPages > 1 ? ' (Pág. 1 ignorada)' : ''}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         
@@ -699,8 +701,10 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await getDocument({ data: arrayBuffer }).promise;
         
-        for (let i = 1; i <= pdf.numPages; i++) {
-          setExtractionProgress(`Processando página ${i} de ${pdf.numPages}...`);
+        const startPage = pdf.numPages > 1 ? 2 : 1;
+        
+        for (let i = startPage; i <= pdf.numPages; i++) {
+          setExtractionProgress(`Processando página ${i} de ${pdf.numPages}${pdf.numPages > 1 ? ' (Pág. 1 ignorada)' : ''}...`);
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale: 2.0 });
           const canvas = document.createElement('canvas');
