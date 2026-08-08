@@ -420,7 +420,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const correctCnpj = allCnpjs.length > 1 ? allCnpjs[allCnpjs.length - 1] : allCnpjs[0];
 
         // Extração aprimorada de Ordem de Compra e Prazo de Entrega para a plataforma Apoio de Compras
-        const orderNumberMatch = fullBlockStr.match(/(?:Ordem de Compra|Nº da Ordem|Nº OC|O\.C\.|OC|Pedido|Autorização de Compra)[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i);
+        const orderNumberMatch = fullBlockStr.match(/(?:Cód\.?\s*Ordem de Compra|Cód\.?\s*OC|Ordem de Compra|Nº da Ordem|Nº OC|O\.C\.|OC|Pedido|Autorização de Compra)[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i);
         const deadlineMatch = fullBlockStr.match(/(?:Prazo de Entrega|Prazo Entrega|Prazo de envio|Prazo)[: ]*([^\n]+)/i) || fullBlockStr.match(/(\d+)\s*dias/i) || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i);
 
         const supplierData: any = {
@@ -521,8 +521,15 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                 .replace(/\b(?:Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
                 .replace(/\s+/g, ' ').trim();
 
-            const cQtyStr = item.qty.replace(/[^\d.,]/g, '');
-            let quantity = parseFloat(cQtyStr.replace('.', '').replace(',', '.'));
+            const qtyLeadingMatch = item.qty.trim().match(/^\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,\d+)?/);
+            let quantity = 0;
+            if (qtyLeadingMatch) {
+                const rawNumStr = qtyLeadingMatch[0].replace(/\./g, '').replace(',', '.');
+                quantity = parseFloat(rawNumStr);
+            } else {
+                const cQtyStr = item.qty.replace(/[^\d.,]/g, '');
+                quantity = parseFloat(cQtyStr.replace('.', '').replace(',', '.'));
+            }
             
             // O PDF PODE picotar "R$ 100,50" em ["R$", "100,50"] ou pior ["100,", "50"]
             // Precisamos limpar e juntar o dinheiro de formatação quebrada
@@ -535,6 +542,19 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                     normalizedPr = normalizedPr.replace(/\./g, '').replace(',', '.');
                 }
                 unitPrice = parseFloat(normalizedPr);
+            }
+
+            const cTotalStr = item.total ? item.total.replace(/[^\d.,]/g, '') : '';
+            let totalValue = 0;
+            if (cTotalStr) {
+                let normTotal = cTotalStr;
+                if (normTotal.includes(',')) {
+                    normTotal = normTotal.replace(/\./g, '').replace(',', '.');
+                }
+                totalValue = parseFloat(normTotal);
+            }
+            if (!totalValue || isNaN(totalValue)) {
+                totalValue = quantity * unitPrice;
             }
 
             // Unidade padrão ou tentar arrancar do final da qty/pack
@@ -552,9 +572,9 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
                     quantity: quantity,
                     unitPrice: unitPrice,
                     unit: unit,
-                    totalValue: quantity * unitPrice
+                    totalValue: totalValue
                 });
-                sup.totalValue += (quantity * unitPrice);
+                sup.totalValue += totalValue;
             }
         }
 

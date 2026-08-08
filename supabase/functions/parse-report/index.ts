@@ -71,15 +71,21 @@ Deno.serve(async (req) => {
       Você é um especialista em logística e compras hospitalares. Analise este relatório da "Plataforma Apoio de Compras" / "Apoio Cotações" (Relatório de Produtos Confirmados) e extraia todos os dados organizando por fornecedor (âncora de repetição).
       
       INSTRUÇÕES DE EXTRAÇÃO:
-      1. Para cada fornecedor (bloco com o nome da empresa/fornecedor), extraia:
-         - Identificação da Cotação: Número da Cotação (Quotation Number) e Título/Descrição do Relatório.
-         - Dados do Fornecedor: Nome Fantasia/Razão Social, CNPJ, E-mail e Número da Ordem de Compra (OC).
-         - Logística: Prazo de Entrega (Delivery Deadline) em dias ou data limite.
-         - Lista de Produtos Confirmados: Todos os itens confirmados com código, descrição detalhada do produto, quantidade confirmada, valor unitário (R$), valor total (R$) e unidade de medida (UN, CX, FR, PC, KG, etc.).
+      1. Para cada fornecedor (bloco com o nome da empresa/fornecedor, ex: "ANTIBIÓTICOS DO BRASIL LTDA", CNPJ), extraia:
+         - Identificação da Cotação: Número da Cotação (Quotation Number) e Título/Descrição.
+         - Dados do Fornecedor: Nome Fantasia/Razão Social, CNPJ (ex: 05.439.635/0001-03) e Número da Ordem de Compra (localizado em "Cód. Ordem de Compra:", ex: 28984).
+         - Logística: Prazo de Entrega (Delivery Deadline, ex: 10 dias).
+         - Lista de Produtos Confirmados: Todos os itens da tabela (colunas "informação do produto", "descrição", "quantidade", "valor unitário", "valor total"):
+           * "code": Número sob a coluna "informação do produto" (ex: 6069, 69156).
+           * "description": Texto sob a coluna "descrição" (ex: "CEFAZOLINA PO P/ SOL INJ 1G").
+           * "quantity": Número puro da quantidade (ex: de "600FR/A1000S", extraia apenas 600; de "200FRS", extraia 200).
+           * "unitPrice": Valor numérico em R$ (ex: 3.40, 5.00).
+           * "totalValue": Valor total em R$ (ex: 2040.00, 1000.00).
+           * "unit": Unidade ou embalagem (ex: "caixa c/ 50", "FRS", "FR").
 
       2. Regras de Negócio:
          - Se o valor total de um item não estiver explícito, calcule (Quantidade * Valor Unitário).
-         - Remova caracteres desnecessários e quebras de linha no meio da descrição dos produtos.
+         - Limpe caracteres e quebras de linha indesejadas nas descrições.
          - Retorne APENAS o JSON no formato especificado abaixo.
 
       FORMATO DE SAÍDA:
