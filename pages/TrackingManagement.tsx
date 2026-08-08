@@ -389,9 +389,9 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         
         let name = blockLines[0].str.split('  ')[0].trim();
         
-        if (name.match(/RELATÓRIO|CONFIRMADOS|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
+        if (name.match(/RELATÓRIO|CONFIRMADOS|PRODUTOS CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|APOIO COTACOES|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
              let idx = 1;
-             while (idx < blockLines.length && blockLines[idx].str.match(/RELATÓRIO|CONFIRMADOS|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
+             while (idx < blockLines.length && blockLines[idx].str.match(/RELATÓRIO|CONFIRMADOS|PRODUTOS CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|APOIO COTACOES|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
                  idx++;
              }
              if (idx < blockLines.length) {
@@ -417,11 +417,15 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const allCnpjs = fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || [""];
         const correctCnpj = allCnpjs.length > 1 ? allCnpjs[allCnpjs.length - 1] : allCnpjs[0];
 
+        // Extração aprimorada de Ordem de Compra e Prazo de Entrega para a plataforma Apoio de Compras
+        const orderNumberMatch = fullBlockStr.match(/(?:Ordem de Compra|Nº da Ordem|Nº OC|O\.C\.|OC|Pedido|Autorização de Compra)[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i);
+        const deadlineMatch = fullBlockStr.match(/(?:Prazo de Entrega|Prazo Entrega|Prazo de envio|Prazo)[: ]*([^\n]+)/i) || fullBlockStr.match(/(\d+)\s*dias/i) || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i);
+
         const supplierData: any = {
           name: name || "Fornecedor Identificado",
           cnpj: correctCnpj,
-          orderNumber: (fullBlockStr.match(/Ordem de Compra[: ]*(\d+)/i) || fullBlockStr.match(/OC[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i) || ["", ""])[1],
-          deliveryDeadline: (fullBlockStr.match(/Prazo de entrega[: ]*([^\n]+)/i)?.[1] || fullBlockStr.match(/(\d+)\s*dias/i)?.[1] || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i)?.[1] || "---").trim().replace(/Faturamento.*$/i, ''),
+          orderNumber: orderNumberMatch ? orderNumberMatch[1] : "",
+          deliveryDeadline: deadlineMatch ? deadlineMatch[1].trim().replace(/Faturamento.*$/i, '') : "---",
           totalValue: 0,
           items: []
         };

@@ -68,18 +68,18 @@ Deno.serve(async (req) => {
         }
 
         const prompt = `
-      Você é um especialista em logística hospitalar. Analise este relatório da "Apoio Cotações" e extraia os dados organizando por fornecedor (âncora de repetição).
+      Você é um especialista em logística e compras hospitalares. Analise este relatório da "Plataforma Apoio de Compras" / "Apoio Cotações" (Relatório de Produtos Confirmados) e extraia todos os dados organizando por fornecedor (âncora de repetição).
       
       INSTRUÇÕES DE EXTRAÇÃO:
-      1. Para cada fornecedor (geralmente identificado por um bloco de título com o nome da empresa), extraia:
-         - Identificação: Número da Cotação (Quotation Number) e Título.
-         - Dados do Fornecedor: Nome Fantasia, CNPJ, E-mail e Número da Ordem de Compra.
-         - Logística: Prazo de Entrega (Delivery Deadline) em dias.
-         - Itens: Uma lista completa de itens confirmados, incluindo código, descrição, quantidade, valor unitário, valor total e unidade de medida.
+      1. Para cada fornecedor (bloco com o nome da empresa/fornecedor), extraia:
+         - Identificação da Cotação: Número da Cotação (Quotation Number) e Título/Descrição do Relatório.
+         - Dados do Fornecedor: Nome Fantasia/Razão Social, CNPJ, E-mail e Número da Ordem de Compra (OC).
+         - Logística: Prazo de Entrega (Delivery Deadline) em dias ou data limite.
+         - Lista de Produtos Confirmados: Todos os itens confirmados com código, descrição detalhada do produto, quantidade confirmada, valor unitário (R$), valor total (R$) e unidade de medida (UN, CX, FR, PC, KG, etc.).
 
       2. Regras de Negócio:
          - Se o valor total de um item não estiver explícito, calcule (Quantidade * Valor Unitário).
-         - Normalize nomes de fornecedores e remova espaços extras.
+         - Remova caracteres desnecessários e quebras de linha no meio da descrição dos produtos.
          - Retorne APENAS o JSON no formato especificado abaixo.
 
       FORMATO DE SAÍDA:

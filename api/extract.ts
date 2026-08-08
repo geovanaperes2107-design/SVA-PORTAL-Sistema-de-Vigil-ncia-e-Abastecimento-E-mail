@@ -42,11 +42,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const lines = section.split('\n');
             const supplierName = lines[0].trim();
             
+            const orderMatch = section.match(/(?:Ordem de Compra|Nº da Ordem|Nº OC|O\.C\.|OC|Pedido|Autorização de Compra)[: ]*(\d+)/i) || section.match(/Compra[: ]*(\d+)/i);
+            const deadlineMatch = section.match(/(?:Prazo de Entrega|Prazo Entrega|Prazo de envio|Prazo)[: ]*([^\n]+)/i) || section.match(/(\d+)\s*dias/i) || section.match(/Entrega[: ]*([\d/]+)/i);
+
             const supplierData: any = {
                 name: supplierName,
                 cnpj: (section.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [""])[0],
-                orderNumber: (section.match(/OC[: ]*(\d+)/i) || [""])[1] || "",
-                deliveryDeadline: (section.match(/(\d+)\s*dias/i) || [""])[1] || "5",
+                orderNumber: orderMatch ? orderMatch[1] : "",
+                deliveryDeadline: deadlineMatch ? deadlineMatch[1].trim().replace(/Faturamento.*$/i, '') : "---",
                 items: []
             };
 
