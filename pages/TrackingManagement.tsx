@@ -162,11 +162,33 @@ const SupplierTriageCard: React.FC<{ order: PurchaseOrder, onConfirm: any, onDec
           <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
             {((order as any)?.items || []).map((it: any, i: number) => {
               if (!it) return null;
+              
+              let rawCode = String(it?.product?.codeMVSES || it?.product?.code || it?.code || '---').trim();
+              let rawDesc = String(it?.product?.name || it?.description || '').trim();
+
+              let displayCode = rawCode;
+              let displayTitle = "";
+
+              const leadMatch = rawCode.match(/^(\d{1,12})\s*[-:]?\s*(.+)$/);
+              if (leadMatch) {
+                displayCode = leadMatch[1];
+                displayTitle = leadMatch[2].trim();
+              }
+
+              let subtext = rawDesc;
+              if (displayTitle) {
+                if (rawDesc && rawDesc !== displayTitle && !displayTitle.toLowerCase().includes(rawDesc.toLowerCase())) {
+                  subtext = `${displayTitle} - ${rawDesc}`;
+                } else {
+                  subtext = displayTitle;
+                }
+              }
+
               return (
                 <tr key={it?.id || `tr-${i}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors font-sans">
                   <td className="px-6 py-6 border-r border-slate-50 dark:border-slate-800">
-                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{it?.product?.codeMVSES || it?.product?.code || it?.code || '---'}</div>
-                    <div className="text-[10px] text-slate-400 dark:text-slate-600 uppercase font-bold">{it?.product?.name || it?.description || '---'}</div>
+                    <div className="font-black text-slate-800 dark:text-emerald-50 text-sm uppercase">{displayCode}</div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-600 uppercase font-bold">{subtext || '---'}</div>
                   </td>
                   <td className="px-6 py-6 text-xs text-slate-500 dark:text-slate-600 font-bold uppercase text-center">{it?.product?.unit || it?.unit || '---'}</td>
                   <td className="px-6 py-6 text-center font-black text-slate-900 dark:text-white text-lg">{it?.orderQuantity || it?.quantity || 0}</td>
@@ -211,6 +233,19 @@ const FolderUploadCard: React.FC<FolderUploadProps> = ({ groupKey, onExtract, is
     }} disabled={isExtracting} />
   </label>
 );
+
+// Funções auxiliares de limpeza e filtro de fornecedor
+const isCityOrHeaderString = (str: string) => {
+  return !!str.match(/^(?:CIDADE|LOCAL DE ENTREGA|ENDERE[ÇC]O|BAIRRO|UF|ESTADO|COMPRADOR|SOLICITANTE|RESUMO|SVA|COTA[ÇC][AÃ]O|PAINEL)\b/i) ||
+         !!str.match(/(?:CIDADE[:\s]|LOCAL DE ENTREGA|ENDERE[ÇC]O|MUNIC[IÍ]PIO)/i);
+};
+
+const cleanSupplierNameStr = (rawStr: string) => {
+  let clean = rawStr.split(/CNPJ|Cód\.|Prazo|Faturamento|I\.E\.|Telefone|Email|\/ CIDADE|\/ UF| - CIDADE/i)[0].trim();
+  clean = clean.replace(/^(?:Fornecedor|Razão Social|Empresa)[: ]*/i, '').trim();
+  if (isCityOrHeaderString(clean)) return "";
+  return clean;
+};
 
 const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ orders = [], setOrders }) => {
   const [selectedClass, setSelectedClass] = useState<ProductClass | null>(null);
@@ -332,9 +367,27 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
       const itemRegex = /(.*?)\s*(\d+(?:[.,]\d+)?)\s*([A-Z]{2,}(?:[-\/]\w+)?|UN|CX|PC|KG|FR|AMP|L|LT|DZ|GAL|RL|MGS?|COMPS?|FRS?)?\s*(?:R\$?\s*)?([\d.,]+)\s*(?:R\$?\s*)?([\d.,]+)?/i;
 
-      // Split by Supplier - Identifying blocks
+      const isDisclaimerOrLegalText = (str: string) => {
+        return !!str.match(/REGULARIDADE|SEGURIDADE|FGTS|FAZENDA|ABNT|LEGISLA[ÇC][AÃ]O|CERTID[AÃ]O|JUSTI[ÇC]A DO TRABALHO|INEXIST[ÊE]NCIA|D[ÉE]BITO|TERMO DE SERVI[ÇC]O|DISPOSI[ÇC][OÕ]ES|TELEFONE|regularidade para com|Fazenda Federal/i);
+      };
+
+      // Funções auxiliares de limpeza e filtro de fornecedor
+      const isCityOrHeaderString = (str: string) => {
+        return !!str.match(/^(?:CIDADE|LOCAL DE ENTREGA|ENDERE[ÇC]O|BAIRRO|UF|ESTADO|COMPRADOR|SOLICITANTE|RESUMO|SVA|COTA[ÇC][AÃ]O|PAINEL|REGULARIDADE|CERTID[AÃ]O|FAZENDA|ABNT|TELEFONE|FGTS|INEXIST[ÊE]NCIA|DEBITO)\b/i) ||
+               !!str.match(/(?:CIDADE[:\s]|LOCAL DE ENTREGA|ENDERE[ÇC]O|MUNIC[IÍ]PIO|FAZENDA|REGULARIDADE|SEGURIDADE|FGTS|INEXIST[ÊE]NCIA|NORMA|NBR|LEGISLA[ÇC][AÃ]O|JUSTI[ÇC]A DO TRABALHO|TELEFONE 62)/i);
+      };
+
+      const cleanSupplierNameStr = (rawStr: string) => {
+        let clean = rawStr.split(/CNPJ|Cód\.|Prazo|Faturamento|I\.E\.|Telefone|Email|\/ CIDADE|\/ UF| - CIDADE|TELEFONE|regularidade/i)[0].trim();
+        clean = clean.replace(/^(?:Fornecedor|Razão Social|Empresa)[: ]*/i, '').trim();
+        if (isCityOrHeaderString(clean) || isDisclaimerOrLegalText(clean)) return "";
+        return clean;
+      };
+
+      // Split by Supplier - Identifying Supplier Cards
       const supplierBlocks: any[][] = [];
       let currentBlock: any[] = [];
+      let hasSeenFirstSupplierMarker = false;
       
       for (let i = 0; i < allLines.length; i++) {
           const lineObj = allLines[i];
@@ -342,89 +395,87 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           
           const cleanLine = lineObj.str.replace(/\s+/g, ' ').trim();
           let isNewBlock = false;
-          let keepPreviousLine = false;
 
-          // Separador Clássico
-          if (cleanLine.match(/Dados do Fornecedor/i) || cleanLine.match(/^FORNECEDOR\b/i)) {
+          // Se a linha for disclaimer legal ou aviso de rodapé com CNPJ do comprador/órgão, ignorar como novo bloco
+          if (isDisclaimerOrLegalText(cleanLine)) {
+              if (currentBlock.length > 0) currentBlock.push(lineObj);
+              continue;
+          }
+
+          // Marcações de início de Card de Fornecedor no Apoio Sistema
+          if (cleanLine.match(/(?:Dados do Fornecedor|CARD DO FORNECEDOR|^FORNECEDOR\b|Razão Social:|Empresa:)/i)) {
               isNewBlock = true;
-              keepPreviousLine = true;
-          } 
-          // Separador Numérico (ex: "01", "02") seguido de nome e CNPJ
-          else if (currentBlock.length > 5) {
-              let nextCnpjIndex = -1;
-              for (let k = 1; k <= 3; k++) {
-                  if (allLines[i+k] && allLines[i+k].str.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) && !allLines[i+k].str.match(/Faturamento/i)) {
-                      nextCnpjIndex = k;
-                      break;
-                  }
-              }
-              // Se há um CNPJ logo abaixo (k=1, k=2), a linha atual ou a próxima formam o cabeçalho.
-              // Vamos cortar o bloco na linha imediatamente anterior ou na numeração.
-              if (nextCnpjIndex !== -1) {
-                  if (nextCnpjIndex === 1 || cleanLine.match(/^\d{1,2}(\s|$)/)) {
-                      isNewBlock = true;
-                  }
-              }
+          } else if (cleanLine.match(/^\d{1,2}\s*[-.]\s+[A-ZÀ-Ÿ]/i) && !cleanLine.match(/REGULARIDADE|SEGURIDADE|FAZENDA|ABNT/i)) {
+              isNewBlock = true;
+          } else if (currentBlock.length > 5 && cleanLine.match(/CNPJ[:\s]*\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/i) && !cleanLine.match(/Faturamento|regularidade|Fazenda|FGTS/i)) {
+              isNewBlock = true;
           }
 
           if (isNewBlock) {
-              if (currentBlock.length > 1) {
-                  if (keepPreviousLine) {
-                      const potentialSupplierName = currentBlock.pop()!;
-                      supplierBlocks.push(currentBlock);
-                      currentBlock = [potentialSupplierName, lineObj];
-                  } else {
-                      supplierBlocks.push(currentBlock);
-                      currentBlock = [lineObj];
-                  }
-              } else {
-                  currentBlock.push(lineObj);
+              if (currentBlock.length > 0 && hasSeenFirstSupplierMarker) {
+                  supplierBlocks.push(currentBlock);
               }
+              hasSeenFirstSupplierMarker = true;
+              currentBlock = [lineObj];
           } else {
               currentBlock.push(lineObj);
           }
       }
-      if (currentBlock.length > 0) supplierBlocks.push(currentBlock);
+      if (currentBlock.length > 0 && hasSeenFirstSupplierMarker) {
+          supplierBlocks.push(currentBlock);
+      }
+      if (supplierBlocks.length === 0 && currentBlock.length > 0) {
+          supplierBlocks.push(currentBlock);
+      }
 
       for (const blockLines of supplierBlocks) {
         const fullBlockStr = blockLines.map((l: any) => l.str).join('\n');
         
-        let name = blockLines[0].str.split('  ')[0].trim();
+        let name = "";
         
-        if (name.match(/RELATÓRIO|CONFIRMADOS|PRODUTOS CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|APOIO COTACOES|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
-             let idx = 1;
-             while (idx < blockLines.length && blockLines[idx].str.match(/RELATÓRIO|CONFIRMADOS|PRODUTOS CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|APOIO COTACOES|ACOMPANHAMENTO|CNPJ|LOCAL DE ENTREGA/i)) {
-                 idx++;
-             }
-             if (idx < blockLines.length) {
-                 name = blockLines[idx].str.split('  ')[0].trim();
-                 if (name.match(/^\d{1,2}$/) && blockLines.length > idx + 1) {
-                     name = blockLines[idx+1].str.split('  ')[0].trim();
-                 }
-             }
-        } else if (name.match(/^\d{1,2}$/) && blockLines.length > 1) {
-            name = blockLines[1].str.split('  ')[0].trim();
+        // 1. Extração do Nome do Fornecedor por Rótulos Explícitos
+        const explicitMatch = fullBlockStr.match(/(?:Fornecedor|Razão Social|Empresa|Empresa\/Fornecedor)[: ]*([^\n\r@]+)/i);
+        if (explicitMatch && explicitMatch[1].trim() && !explicitMatch[1].match(/^CNPJ/i)) {
+            name = cleanSupplierNameStr(explicitMatch[1]);
         }
 
-        // Se a primeira linha for literalmente só "Dados do fornecedor" ou vazia, tenta o fallback
-        if (!name || name.length < 3 || name.match(/Dados do Fornecedor|FORNECEDOR\b/i)) {
-            const nameMatch = fullBlockStr.match(/FORNECEDOR[: \n]*([^@\n\r]+)/i) || fullBlockStr.match(/EMPRESA[: \n]*([^@\n\r]+)/i);
-            if (nameMatch && !nameMatch[1].match(/cnpj/i)) {
-                name = nameMatch[1].split('CNPJ')[0].trim();
-            } else if (blockLines[1] && !blockLines[1].str.match(/Dados do Fornecedor|FORNECEDOR/i)) {
-                name = blockLines[1].str.split('  ')[0].trim();
+        // 2. Fallback: Inspeção das primeiras linhas do bloco do Card
+        if (!name || name.length < 3) {
+            for (let k = 0; k < Math.min(6, blockLines.length); k++) {
+                let lineStr = blockLines[k].str.trim();
+                if (lineStr.match(/RELATÓRIO|CONFIRMADOS|PRODUTOS CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|APOIO COTACOES|ACOMPANHAMENTO|LOCAL DE ENTREGA|CIDADE|MUNICÍPIO|COMPRADOR|SOLICITANTE|SVA|COTAÇÃO|REGULARIDADE|FAZENDA|FGTS/i)) {
+                    continue;
+                }
+                lineStr = lineStr.replace(/^\d{1,2}\s*[-.]\s*/, '');
+                lineStr = cleanSupplierNameStr(lineStr);
+
+                if (lineStr.length >= 3 && !lineStr.match(/^\d+$/) && !lineStr.match(/Dados do Fornecedor|CARD DO FORNECEDOR/i)) {
+                    name = lineStr;
+                    break;
+                }
             }
         }
 
-        const allCnpjs = fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || [""];
-        const correctCnpj = allCnpjs.length > 1 ? allCnpjs[allCnpjs.length - 1] : allCnpjs[0];
+        if (!name || name.length < 3 || isDisclaimerOrLegalText(name)) {
+            name = "Fornecedor Identificado";
+        }
 
-        // Extração aprimorada de Ordem de Compra e Prazo de Entrega para a plataforma Apoio de Compras
+        // 3. Extração do CNPJ do Fornecedor do Card (Prioriza CNPJ rotulado no cabeçalho ou o 1º do bloco)
+        let correctCnpj = "";
+        const explicitCnpjMatch = fullBlockStr.match(/(?:CNPJ|CPF)[:\s]*(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/i);
+        if (explicitCnpjMatch) {
+            correctCnpj = explicitCnpjMatch[1];
+        } else {
+          const allCnpjs = fullBlockStr.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || [""];
+          correctCnpj = allCnpjs[0];
+        }
+
+        // 4. Ordem de Compra e Prazo de Entrega
         const orderNumberMatch = fullBlockStr.match(/(?:Cód\.?\s*Ordem de Compra|Cód\.?\s*OC|Ordem de Compra|Nº da Ordem|Nº OC|O\.C\.|OC|Pedido|Autorização de Compra)[: ]*(\d+)/i) || fullBlockStr.match(/Compra[: ]*(\d+)/i);
         const deadlineMatch = fullBlockStr.match(/(?:Prazo de Entrega|Prazo Entrega|Prazo de envio|Prazo)[: ]*([^\n]+)/i) || fullBlockStr.match(/(\d+)\s*dias/i) || fullBlockStr.match(/Entrega[: ]*([\d/]+)/i);
 
         const supplierData: any = {
-          name: name || "Fornecedor Identificado",
+          name: name,
           cnpj: correctCnpj,
           orderNumber: orderNumberMatch ? orderNumberMatch[1] : "",
           deliveryDeadline: deadlineMatch ? deadlineMatch[1].trim().replace(/Faturamento.*$/i, '') : "---",
@@ -432,251 +483,285 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
           items: []
         };
 
-        // --- NOVO EXTRATOR GEOMÉTRICO (TABULAR) ---
-        let usedTabular = false;
-        let colXs: Record<string, number> = { code: -1, desc: -1, pack: -1, qty: -1, price: -1, total: -1 };
-        
-        for (const line of blockLines) {
-            const txtLine = line.str.toLowerCase();
-            const hasQtyWord = txtLine.match(/quantidade|qtd|quant|qnt/);
-            const hasPriceWord = txtLine.match(/valor|preço|preco|vl|unit|total|subtotal/);
-            const hasDescWord = txtLine.match(/descriç|descricao|produto|item|código|codigo/);
+        // --- NOVO EXTRATOR ANCORADO À DIREITA (POR CARD DE FORNECEDOR) ---
+        const cardItemLineRegex = /^(?:(\d{2,12})\s+)?(.+?)\s+(\d{1,6}(?:\.\d{3})*)\s+([A-Z0-9\/\-\.]{1,15})\s+(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+[\.,]\d{2})(?:\s+(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+[\.,]\d{2}))?$/i;
 
-            if ((hasQtyWord && hasPriceWord) || (hasDescWord && (hasQtyWord || hasPriceWord))) {
-                if (line.items) {
-                    line.items.forEach((it: any) => {
-                        const txt = it.str.toLowerCase().trim();
-                        if ((txt.includes('código') || txt.includes('codigo') || txt.includes('cod.') || txt.includes('informa') || txt.includes('item')) && colXs.code === -1) colXs.code = it.visualX;
-                        else if ((txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('especifica')) && colXs.desc === -1) colXs.desc = it.visualX;
-                        else if ((txt.includes('embalagem') || txt.includes('unid') || txt.includes('un.') || txt.includes('emb.')) && colXs.pack === -1) colXs.pack = it.visualX;
-                        else if ((txt.includes('quantidade') || txt.includes('qtd') || txt.includes('quant') || txt.includes('qnt')) && colXs.qty === -1) colXs.qty = it.visualX;
-                        else if ((txt.includes('unitário') || txt.includes('unitario') || txt.includes('unit') || txt.includes('preço') || txt.includes('preco') || txt.includes('vl.')) && colXs.price === -1) colXs.price = it.visualX;
-                        else if ((txt.includes('total') || txt.includes('subtotal')) && colXs.total === -1) colXs.total = it.visualX;
-                    });
-                }
-                if (colXs.qty !== -1 || colXs.price !== -1) break;
-            }
-        }
+        for (const lineObj of blockLines) {
+            const lineStr = lineObj.str.trim();
+            if (!lineStr || lineStr === "---PAGE_BREAK---") continue;
+            if (isDisclaimerOrLegalText(lineStr)) continue;
+            if (lineStr.match(/RELATÓRIO|CONFIRMADOS|APOIO DE COMPRAS|APOIO COTAÇÕE|CNPJ|LOCAL DE ENTREGA|Dados do Fornecedor/i) && !lineStr.match(/R\$/)) continue;
 
-        // Se localizou as coordenadas chave, utiliza extração geométrica
-        if (colXs.qty !== -1 && colXs.price !== -1) {
-            usedTabular = true;
-            let activeItem: any = null;
+            const match = lineStr.match(cardItemLineRegex);
+            if (match) {
+                let code = match[1] || "---";
+                let description = match[2].trim();
+                const qtyStr = match[3].replace(/\./g, '').replace(',', '.');
+                const quantity = parseFloat(qtyStr);
+                const unit = match[4].toUpperCase();
+                const unitPriceStr = match[5].replace(/\./g, '').replace(',', '.');
+                const unitPrice = parseFloat(unitPriceStr);
+                const totalValueStr = match[6] ? match[6].replace(/\./g, '').replace(',', '.') : '';
+                let totalValue = totalValueStr ? parseFloat(totalValueStr) : quantity * unitPrice;
 
-            // Ordena as colunas por X para definir intervalos (boundaries)
-            const sortedEntries = Object.entries(colXs).filter(e => e[1] !== -1).sort((a, b) => a[1] - b[1]);
+                if (isDisclaimerOrLegalText(description)) continue;
 
-            for (const line of blockLines) {
-                if (line.str.trim() === "---PAGE_BREAK---") continue;
-                if (line.str.match(/quantidade/i) && line.str.match(/valor/i)) continue;
-                if (!line.items || line.items.length === 0) continue;
-                
-                if (line.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL:|SUBTOTAL|I\.E\.|Telefone|Email|Local de Entrega/i) && line.items.length < 5) continue;
-                if (line.str.match(/^[-\s]*$/)) continue;
-
-                const lineCols: Record<string, string[]> = { code: [], desc: [], pack: [], qty: [], price: [], total: [] };
-
-                // Classifica cada pedacinho visual pelo X da coluna
-                line.items.forEach((it: any) => {
-                    if (it.str.trim() === '') return;
-                    let matchedKey = sortedEntries[0][0];
-                    for (let i = 0; i < sortedEntries.length; i++) {
-                        const colLeftBoundary = sortedEntries[i][1] - 30; // Margem
-                        if (it.visualX >= colLeftBoundary) {
-                            matchedKey = sortedEntries[i][0];
-                        }
+                // Separar código e descrição caso estejam concatenados
+                if (code === "---") {
+                    const leadCodeMatch = description.match(/^(\d{2,12})\s*[-:]?\s*(.+)$/);
+                    if (leadCodeMatch) {
+                        code = leadCodeMatch[1];
+                        description = leadCodeMatch[2].trim();
                     }
-                    lineCols[matchedKey].push(it.str);
-                });
-
-                const cText = lineCols.code.join(' ').trim();
-                const dText = lineCols.desc.join(' ').trim();
-                const qText = lineCols.qty.join(' ').trim();
-                const prText = lineCols.price.join(' ').trim();
-
-                // Se houver um código limpo marcando um novo produto (ou quantidade numérica evidente em nova linha isolada)
-                const isNewItem = (colXs.code !== -1 && cText.match(/^\d{2,15}$/)) || (dText.match(/^[A-Z]{3,}/i) && qText.match(/^\d+/) && prText.match(/^(?:R\$)?\s*[\d.,]+/i));
-
-                if (isNewItem) {
-                    if (activeItem) {
-                        finalizeAndPushGeomItem(activeItem, supplierData);
-                    }
-                    activeItem = { code: cText, desc: dText, pack: lineCols.pack.join(' '), qty: qText, price: prText, total: lineCols.total.join(' ') };
-                } else if (activeItem) {
-                    // Accumulate continuations (wrap broken lines)
-                    if (cText) activeItem.code += " " + cText;
-                    if (dText) activeItem.desc += " " + dText;
-                    if (lineCols.pack.length) activeItem.pack += " " + lineCols.pack.join(' ');
-                    if (qText) activeItem.qty += " " + qText;
-                    if (prText) activeItem.price += " " + prText;
-                    if (lineCols.total.length) activeItem.total += " " + lineCols.total.join(' ');
+                } else {
+                    description = description.replace(new RegExp('^' + code + '[\\s\\-:]*', 'i'), '').trim();
                 }
-            }
-            if (activeItem) finalizeAndPushGeomItem(activeItem, supplierData);
-        }
-
-        function finalizeAndPushGeomItem(item: any, sup: any) {
-            let cleanDesc = item.desc
-                .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE|SUPERMÉDICA|MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
-                .replace(/\b(?:Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
-                .replace(/\s+/g, ' ').trim();
-
-            const qtyLeadingMatch = item.qty.trim().match(/^\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,\d+)?/);
-            let quantity = 0;
-            if (qtyLeadingMatch) {
-                const rawNumStr = qtyLeadingMatch[0].replace(/\./g, '').replace(',', '.');
-                quantity = parseFloat(rawNumStr);
-            } else {
-                const cQtyStr = item.qty.replace(/[^\d.,]/g, '');
-                quantity = parseFloat(cQtyStr.replace('.', '').replace(',', '.'));
-            }
-            
-            // O PDF PODE picotar "R$ 100,50" em ["R$", "100,50"] ou pior ["100,", "50"]
-            // Precisamos limpar e juntar o dinheiro de formatação quebrada
-            const cPriceStr = item.price.replace(/[^\d.,]/g, '');
-            let unitPrice = 0;
-            if (cPriceStr) {
-                // Remove ponto de milhar se houver virgula depois e junta. Ex: 1.496,06 -> 1496.06
-                let normalizedPr = cPriceStr;
-                if (normalizedPr.includes(',')) {
-                    normalizedPr = normalizedPr.replace(/\./g, '').replace(',', '.');
-                }
-                unitPrice = parseFloat(normalizedPr);
-            }
-
-            const cTotalStr = item.total ? item.total.replace(/[^\d.,]/g, '') : '';
-            let totalValue = 0;
-            if (cTotalStr) {
-                let normTotal = cTotalStr;
-                if (normTotal.includes(',')) {
-                    normTotal = normTotal.replace(/\./g, '').replace(',', '.');
-                }
-                totalValue = parseFloat(normTotal);
-            }
-            if (!totalValue || isNaN(totalValue)) {
-                totalValue = quantity * unitPrice;
-            }
-
-            // Unidade padrão ou tentar arrancar do final da qty/pack
-            let unit = item.pack.trim() || 'UN';
-            if (!item.pack.trim() && item.qty.match(/[A-Za-z]{2,}/)) {
-                const untMatch = item.qty.match(/([A-Z]{2,}(?:[-\/]\w+)?)/i);
-                if (untMatch) unit = untMatch[1].toUpperCase();
-            }
-            if (unit.length > 15) unit = 'UN'; // Evita strings monstro
-
-            if (cleanDesc.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
-                sup.items.push({
-                    code: item.code.trim() || "---",
-                    description: cleanDesc,
-                    quantity: quantity,
-                    unitPrice: unitPrice,
-                    unit: unit,
-                    totalValue: totalValue
-                });
-                sup.totalValue += totalValue;
-            }
-        }
-
-        // --- BACKUP: ALGORITMO ORIGINAL (Caso o cabeçalho não tenha as posições geométricas no PDF) ---
-        if (!usedTabular) {
-            const anchors: { idx: number, y: number, match: any, str: string }[] = [];
-            for (let j = 0; j < blockLines.length; j++) {
-                const lineObj = blockLines[j];
-                const match = lineObj.str.match(itemRegex);
-                if (match) {
-                    anchors.push({ idx: j, y: lineObj.y, match: match, str: lineObj.str });
-                }
-            }
-
-            for (let i = 0; i < anchors.length; i++) {
-                const anchor = anchors[i];
-                const startLimit = i === 0 ? 0 : anchors[i-1].idx + 1;
-                const endLimit = i === anchors.length - 1 ? blockLines.length - 1 : anchors[i+1].idx - 1;
-                
-                const myBlockStrings: string[] = [];
-                
-                for (let k = startLimit; k <= endLimit; k++) {
-                    const orphan = blockLines[k];
-                    if (k === anchor.idx) {
-                        myBlockStrings.push(orphan.str);
-                        continue;
-                    }
-                    if (k === 0) continue; 
-                    if (orphan.str.trim() === "---PAGE_BREAK---") continue;
-                    if (orphan.str.match(/HTTPS?:\/\//i) || orphan.str.match(/P[AÁ]G\.\s*\d+/i)) continue;
-                    if (orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) continue;
-                    if (orphan.str.match(/^[-\s]*$/)) continue;
-
-                    const distToMe = Math.abs(orphan.y - anchor.y);
-                    let closestIsMe = true;
-
-                    if (i > 0 && k < anchor.idx) {
-                        const distToPrev = Math.abs(orphan.y - anchors[i-1].y);
-                        if (distToPrev < distToMe) closestIsMe = false;
-                    }
-                    if (i < anchors.length - 1 && k > anchor.idx) {
-                        const distToNext = Math.abs(orphan.y - anchors[i+1].y);
-                        if (distToNext < distToMe) closestIsMe = false;
-                    }
-
-                    if (closestIsMe) {
-                        myBlockStrings.push(orphan.str);
-                    }
-                }
-
-                let descriptionText = "";
-                let code = "---";
-                
-                const qtyStr = anchor.match[2];
-                const unitPriceStr = anchor.match[4];
-                const quantity = parseFloat(qtyStr.replace('.', '').replace(',', '.'));
-                const unitPrice = parseFloat(unitPriceStr.replace('.', '').replace(',', '.'));
-                const unit = anchor.match[3] ? anchor.match[3].toUpperCase() : 'UN';
-
-                for (const str of myBlockStrings) {
-                    let cleanStr = str;
-                    if (str === anchor.str) {
-                        cleanStr = anchor.match[1].trim();
-                    }
-                    const cMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s+/);
-                    const isoMatch = cleanStr.trim().match(/^\s*(\d{2,12})\s*$/);
-                    if (cMatch && code === "---") code = cMatch[1];
-                    else if (isoMatch && code === "---") code = isoMatch[1];
-                    descriptionText += " " + cleanStr;
-                }
-
-                let description = descriptionText
-                      .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE|MARCA|FABRICANTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
-                      .replace(/\b(?:SUPERMÉDICA|SUPERMEDICA|SUPER MEDICA)\b/gi, '')
-                      .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
-                      .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
-                      .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
-                      .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|Informação|KDL|BRASIL|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
-                      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.\-\s]+(?:\.[A-Z]{2,})+\b/gi, '')
-                      .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
-                      .replace(/\b(?:caixa|pacote|frasco|unidade|galão|rolo|metro|peça)s?\s*(?:c\/\s*)?[\d.,]+\b/gi, '')
-                      .replace(/\bc\/?\s*(?:[\d.,]+|unidade)\b/gi, '')
-                      .replace(/\b(?:MEDSONDA|WILTEX|WELDON|WELL\s+LEAD|FOYOMED|UNISIS|STERILANCE|HELP\s+FIX|POLAR\s*FIX|DESCARPACK|CREMER|TRAMONTINA|SOLIDOR|SUPERMAX|TAYLOR|EMBRAMAC|NEOJECT|BD|INJEX|BIOTEC|MAQUIRA|SALDANHA|RODRIGUES|BIOTEXTIL|SOMA|CSL\s+BEHRING|GEOLAB|FARMACE|CIMED|UNIAO\s+QUIMICA|MYLAN\/VIATRIS|CRISTÁLIA|CRISTALIA|SANTISA|EQUIPLEX|CSL)\b/gi, '')
-                      .replace(/\b(?:IND\.?\s*E\s*COM\.?|LTDA\.?|S\.?A\.?|M\.?E\.?|E\.?P\.?P\.?|HOSP\.?|COM[EÉ]RCIO|IND[UÚ]STRIA|IMP\.?|EXP\.?|Distribu[ií]dora|Comercial|PROD\.?)(?=\s|$|\W)/gi, '')
-                      .replace(/\b(?:DE|DO|DA|E|C\/)\s+(?=\s|$)/gi, '')
-                      .replace(/\s+/g, ' ').replace(/^[-\s]+|[-\s]+$/g, '').replace(/^\d{1,4}\s+/, '');
+                description = description.replace(/^\d{2,12}\s*[-:]\s*/, '').trim();
 
                 if (description.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
                     supplierData.items.push({
-                      code: code,
-                      description: description,
-                      quantity: quantity,
-                      unitPrice: unitPrice,
-                      unit: unit,
-                      totalValue: quantity * unitPrice
+                        code: code,
+                        description: description,
+                        quantity: quantity,
+                        unitPrice: unitPrice,
+                        unit: unit,
+                        totalValue: totalValue
                     });
-                    supplierData.totalValue += (quantity * unitPrice);
+                    supplierData.totalValue += totalValue;
                 }
             }
         }
 
-        if (supplierData.items.length > 0 || (supplierData.cnpj && supplierData.name !== "Fornecedor Identificado")) {
+        // --- EXTRATOR GEOMÉTRICO (FALLBACK CASO A LINHA TENHA SIDO FRAGMENTADA) ---
+        if (supplierData.items.length === 0) {
+            let usedTabular = false;
+            let colXs: Record<string, number> = { code: -1, desc: -1, pack: -1, qty: -1, price: -1, total: -1 };
+            
+            for (const line of blockLines) {
+                const txtLine = line.str.toLowerCase();
+                const hasQtyWord = txtLine.match(/quantidade|qtd|quant|qnt/);
+                const hasPriceWord = txtLine.match(/valor|preço|preco|vl|unit|total|subtotal/);
+                const hasDescWord = txtLine.match(/descriç|descricao|produto|item|código|codigo/);
+
+                if ((hasQtyWord && hasPriceWord) || (hasDescWord && (hasQtyWord || hasPriceWord))) {
+                    if (line.items) {
+                        line.items.forEach((it: any) => {
+                            const txt = it.str.toLowerCase().trim();
+                            if ((txt.includes('código') || txt.includes('codigo') || txt.includes('cod.') || txt.includes('informa') || txt.includes('item')) && colXs.code === -1) colXs.code = it.visualX;
+                            else if ((txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('especifica')) && colXs.desc === -1) colXs.desc = it.visualX;
+                            else if ((txt.includes('embalagem') || txt.includes('unid') || txt.includes('un.') || txt.includes('emb.')) && colXs.pack === -1) colXs.pack = it.visualX;
+                            else if ((txt.includes('quantidade') || txt.includes('qtd') || txt.includes('quant') || txt.includes('qnt')) && colXs.qty === -1) colXs.qty = it.visualX;
+                            else if ((txt.includes('unitário') || txt.includes('unitario') || txt.includes('unit') || txt.includes('preço') || txt.includes('preco') || txt.includes('vl.')) && colXs.price === -1) colXs.price = it.visualX;
+                            else if ((txt.includes('total') || txt.includes('subtotal')) && colXs.total === -1) colXs.total = it.visualX;
+                        });
+                    }
+                    if (colXs.qty !== -1 || colXs.price !== -1) break;
+                }
+            }
+
+            const finalizeAndPushGeomItem = (itemObj: any, supData: any) => {
+                let code = itemObj.code ? itemObj.code.trim() : "---";
+                let description = itemObj.desc ? itemObj.desc.trim() : "";
+                if (isDisclaimerOrLegalText(description)) return;
+                
+                if (code === "---" || code.match(/[a-zÀ-ÿ]/i)) {
+                    const leadMatch = description.match(/^(\d{2,12})\s*[-:]?\s*(.+)$/);
+                    if (leadMatch) {
+                        code = leadMatch[1];
+                        description = leadMatch[2].trim();
+                    }
+                } else if (description.startsWith(code)) {
+                    description = description.replace(new RegExp('^' + code + '[\\s\\-:]*', 'i'), '').trim();
+                }
+                description = description.replace(/^\d{2,12}\s*[-:]\s*/, '').trim();
+
+                const qtyNum = parseFloat((itemObj.qty || '').replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+                const priceNum = parseFloat((itemObj.price || '').replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+                let totalNum = parseFloat((itemObj.total || '').replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+                if (isNaN(totalNum) || totalNum <= 0) totalNum = qtyNum * priceNum;
+
+                if (description.length > 2 && !isNaN(qtyNum) && qtyNum > 0 && !isNaN(priceNum)) {
+                    supData.items.push({
+                        code: code,
+                        description: description,
+                        quantity: qtyNum,
+                        unitPrice: priceNum,
+                        unit: itemObj.pack ? itemObj.pack.trim().toUpperCase() : 'UN',
+                        totalValue: totalNum
+                    });
+                    supData.totalValue += totalNum;
+                }
+            };
+
+            if (colXs.qty !== -1 && colXs.price !== -1) {
+                usedTabular = true;
+                let activeItem: any = null;
+                const sortedEntries = Object.entries(colXs).filter(e => e[1] !== -1).sort((a, b) => a[1] - b[1]);
+
+                for (const line of blockLines) {
+                    if (line.str.trim() === "---PAGE_BREAK---") continue;
+                    if (isDisclaimerOrLegalText(line.str)) continue;
+                    if (line.str.match(/quantidade/i) && line.str.match(/valor/i)) continue;
+                    if (!line.items || line.items.length === 0) continue;
+                    if (line.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL:|SUBTOTAL|I\.E\.|Telefone|Email|Local de Entrega/i) && line.items.length < 5) continue;
+
+                    const lineCols: Record<string, string[]> = { code: [], desc: [], pack: [], qty: [], price: [], total: [] };
+
+                    line.items.forEach((it: any) => {
+                        if (it.str.trim() === '') return;
+                        let matchedKey = sortedEntries[0][0];
+                        for (let i = 0; i < sortedEntries.length; i++) {
+                            const colLeftBoundary = sortedEntries[i][1] - 30;
+                            if (it.visualX >= colLeftBoundary) {
+                                matchedKey = sortedEntries[i][0];
+                            }
+                        }
+                        lineCols[matchedKey].push(it.str);
+                    });
+
+                    const cText = lineCols.code.join(' ').trim();
+                    const dText = lineCols.desc.join(' ').trim();
+                    const qText = lineCols.qty.join(' ').trim();
+                    const prText = lineCols.price.join(' ').trim();
+
+                    const isNewItem = (colXs.code !== -1 && cText.match(/^\d{2,15}$/)) || (dText.match(/^[A-Z]{3,}/i) && qText.match(/^\d+/) && prText.match(/^(?:R\$)?\s*[\d.,]+/i));
+
+                    if (isNewItem) {
+                        if (activeItem) finalizeAndPushGeomItem(activeItem, supplierData);
+                        activeItem = { code: cText, desc: dText, pack: lineCols.pack.join(' '), qty: qText, price: prText, total: lineCols.total.join(' ') };
+                    } else if (activeItem) {
+                        if (cText) activeItem.code += " " + cText;
+                        if (dText) activeItem.desc += " " + dText;
+                        if (lineCols.pack.length) activeItem.pack += " " + lineCols.pack.join(' ');
+                        if (qText) activeItem.qty += " " + qText;
+                        if (prText) activeItem.price += " " + prText;
+                        if (lineCols.total.length) activeItem.total += " " + lineCols.total.join(' ');
+                    }
+                }
+                if (activeItem) finalizeAndPushGeomItem(activeItem, supplierData);
+            }
+
+            // BACKUP DE REGEX ANCORADO QUANDO NÃO HÁ POSIÇÕES TABULARES
+            if (!usedTabular) {
+                const anchors: { idx: number, y: number, match: any, str: string }[] = [];
+                for (let j = 0; j < blockLines.length; j++) {
+                    const lineObj = blockLines[j];
+                    if (isDisclaimerOrLegalText(lineObj.str)) continue;
+                    const match = lineObj.str.match(itemRegex);
+                    if (match) {
+                        anchors.push({ idx: j, y: lineObj.y, match: match, str: lineObj.str });
+                    }
+                }
+
+                const assignedIndices = new Set<number>();
+
+                for (let i = 0; i < anchors.length; i++) {
+                    const anchor = anchors[i];
+                    assignedIndices.add(anchor.idx);
+
+                    const myPrefixStrings: string[] = [];
+                    const mySuffixStrings: string[] = [];
+
+                    // Estratégia de Quebra de 2 Linhas por Produto (Pairing):
+                    // Verifica se a linha anterior (anchor.idx - 1) é órfã (não atribuída ao item anterior)
+                    const prevIdx = anchor.idx - 1;
+                    const nextIdx = anchor.idx + 1;
+
+                    let hasPrefixOrphan = false;
+                    if (prevIdx > 0 && !assignedIndices.has(prevIdx)) {
+                        const orphan = blockLines[prevIdx];
+                        if (orphan && orphan.str.trim() !== "---PAGE_BREAK---" && !isDisclaimerOrLegalText(orphan.str)) {
+                            if (!orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) {
+                                myPrefixStrings.push(orphan.str);
+                                assignedIndices.add(prevIdx);
+                                hasPrefixOrphan = true;
+                            }
+                        }
+                    }
+
+                    // Se não usou a linha anterior como prefixo, verifica a linha posterior (anchor.idx + 1)
+                    if (!hasPrefixOrphan && nextIdx < blockLines.length && !assignedIndices.has(nextIdx)) {
+                        const isNextAnchor = anchors.some(a => a.idx === nextIdx);
+                        if (!isNextAnchor) {
+                            const orphan = blockLines[nextIdx];
+                            if (orphan && orphan.str.trim() !== "---PAGE_BREAK---" && !isDisclaimerOrLegalText(orphan.str)) {
+                                if (!orphan.str.match(/CNPJ|FORNECEDOR|EMPRESA|TOTAL|SUBTOTAL|I\.E\.|Telefone|Email|Dados|Validade|Prazo|Código|Descrição|Faturamento|M[ií]nimo|Condiç[õo]es|Pagamento|Ordem de Compra|C[oó]d\.|Comprador|Consultor|Vendedor|Vendedora|Marca|Fabricante|Painel|Acompanhamento|Log[ií]stico|SVA/i)) {
+                                    mySuffixStrings.push(orphan.str);
+                                    assignedIndices.add(nextIdx);
+                                }
+                            }
+                        }
+                    }
+
+                    let code = "---";
+                    let matchedCode = anchor.match[1] ? anchor.match[1].trim() : "";
+                    let matchedDesc = anchor.match[2] ? anchor.match[2].trim() : "";
+
+                    if (!matchedCode || matchedCode === "---") {
+                        const leadCodeMatch = matchedDesc.match(/^(\d{2,12})\s*[-:]?\s*(.+)$/);
+                        if (leadCodeMatch) {
+                            code = leadCodeMatch[1];
+                            matchedDesc = leadCodeMatch[2].trim();
+                        }
+                    } else {
+                        code = matchedCode;
+                        matchedDesc = matchedDesc.replace(new RegExp('^' + code + '[\\s\\-:]*', 'i'), '').trim();
+                    }
+
+                    let fullDescriptionText = "";
+                    if (myPrefixStrings.length > 0) {
+                        fullDescriptionText += myPrefixStrings.join(" ") + " ";
+                    }
+                    fullDescriptionText += matchedDesc;
+                    if (mySuffixStrings.length > 0) {
+                        fullDescriptionText += " " + mySuffixStrings.join(" ");
+                    }
+
+                    const qtyStr = anchor.match[3];
+                    const unitPriceStr = anchor.match[5];
+                    const quantity = parseFloat(qtyStr.replace(/\./g, '').replace(',', '.'));
+                    const unitPrice = parseFloat(unitPriceStr.replace(/\./g, '').replace(',', '.'));
+                    const unit = anchor.match[4] ? anchor.match[4].toUpperCase() : 'UN';
+
+                    let description = fullDescriptionText
+                          .replace(/\b(?:VENDEDOR[A]?|CONSULTOR[A]?|VEND\.|ATENDENTE)\s*[:\-]?\s*[A-ZÀ-Ÿ0-9\s]*\b/gi, '')
+                          .replace(/\b(?:\d+\s*)?(?:[cC]?[oOóÓ]D\.?\s*)?ORDEM\s+DE\s+COMPRA(?:\s*:\s*\d+)?\b/gi, '')
+                          .replace(/\b(?:FATURAMENTO\s+M[IÍ]NIMO(?:\s*:\s*R\$\s*[\d.,]+)?|CONDI[CÇ][OÕ]ES\s+DE\s+PAGAMENTO(?:\s*:\s*[\w\s]+)?)\b/gi, '')
+                          .replace(/\b(\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})?|\d{2}:\d{2}|FALSE|TRUE|SIM|NAO|NÃO)\b/gi, '')
+                          .replace(/\b(?:DO\s+PRODUTO|PRODUTO\s+EM|Código|Descrição|Confirmado|Observação|Informação|CM\.PR\.MD\.HS)(?=\s|$|\W)/gi, '')
+                          .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.\-\s]+(?:\.[A-Z]{2,})+\b/gi, '')
+                          .replace(new RegExp('\\b' + code + '\\b', 'gi'), '')
+                          .replace(/\s+/g, ' ').replace(/^[-\s]+|[-\s]+$/g, '').replace(/^\d{1,4}\s+/, '');
+
+                    if (code === "---" || code.length > 12) {
+                        const leadCodeMatch = description.match(/^(\d{2,12})\s*[-:]?\s*(.+)$/);
+                        if (leadCodeMatch) {
+                            code = leadCodeMatch[1];
+                            description = leadCodeMatch[2].trim();
+                        }
+                    }
+
+                    if (isDisclaimerOrLegalText(description)) continue;
+
+                    if (description.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
+                        supplierData.items.push({
+                          code: code,
+                          description: description,
+                          quantity: quantity,
+                          unitPrice: unitPrice,
+                          unit: unit,
+                          totalValue: quantity * unitPrice
+                        });
+                        supplierData.totalValue += (quantity * unitPrice);
+                    }
+                }
+            }
+        }
+
+        // Filtrar itens irrelevantes/disclaimers que tenham passado pelas validações
+        supplierData.items = supplierData.items.filter((item: any) => !isDisclaimerOrLegalText(item.description));
+
+        if (supplierData.items.length > 0 && supplierData.name !== "Fornecedor Identificado" && !isDisclaimerOrLegalText(supplierData.name)) {
           result.suppliers.push(supplierData);
         }
       }
@@ -817,8 +902,14 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const deadlineMatch = rowText.match(/(?:Prazo de Entrega|Prazo)[: ]*([^\n]+)/i);
         if (deadlineMatch && deliveryDeadline === "---") deliveryDeadline = deadlineMatch[1].trim();
 
-        const supMatch = rowText.match(/(?:Fornecedor|Empresa|Razão Social)[: ]*([^\n]+)/i);
-        if (supMatch && supplierName === "Fornecedor Identificado") supplierName = supMatch[1].trim();
+        const supMatch = rowText.match(/(?:Fornecedor|Razão Social)[: ]*([^\n]+)/i) || rowText.match(/(?:Empresa)[: ]*([^\n]+)/i);
+        if (supMatch && supplierName === "Fornecedor Identificado") {
+          let candidate = supMatch[1].split(/CNPJ|Cód\.|Prazo|Faturamento|I\.E\./i)[0].trim();
+          candidate = candidate.replace(/^(?:Fornecedor|Razão Social|Empresa)[: ]*/i, '').trim();
+          if (!isCityOrHeaderString(candidate) && candidate.length >= 3) {
+            supplierName = candidate;
+          }
+        }
       }
 
       // Localizar linha de cabeçalho das colunas
@@ -831,8 +922,17 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
         row.forEach((cell: any, cIdx: number) => {
           const txt = String(cell || '').toLowerCase().trim();
-          if ((txt.includes('código') || txt.includes('codigo') || txt.includes('cod') || txt.includes('informa')) && colIndices.code === -1) colIndices.code = cIdx;
-          if ((txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('item')) && colIndices.desc === -1) colIndices.desc = cIdx;
+          const isCodeCol = txt === 'código' || txt === 'codigo' || txt === 'cod.' || txt === 'cod';
+          const isDescCol = txt.includes('descrição') || txt.includes('descricao') || txt.includes('desc') || txt.includes('produto') || txt.includes('especificação');
+
+          if (isCodeCol && colIndices.code === -1) colIndices.code = cIdx;
+          if (isDescCol && colIndices.desc === -1 && !isCodeCol) colIndices.desc = cIdx;
+
+          if ((txt.includes('código') || txt.includes('codigo') || txt.includes('informa')) && (txt.includes('descriç') || txt.includes('produto'))) {
+            if (colIndices.code === -1) colIndices.code = cIdx;
+            if (colIndices.desc === -1) colIndices.desc = cIdx;
+          }
+
           if ((txt.includes('quantidade') || txt.includes('qtd') || txt.includes('quant')) && colIndices.qty === -1) colIndices.qty = cIdx;
           if ((txt.includes('unitário') || txt.includes('unitario') || txt.includes('preço') || txt.includes('preco') || txt.includes('vl. unit')) && colIndices.price === -1) colIndices.price = cIdx;
           if ((txt.includes('total') || txt.includes('subtotal')) && colIndices.total === -1) colIndices.total = cIdx;
@@ -852,8 +952,8 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         const row = rows[r];
         if (!row || row.length === 0) continue;
 
-        let code = colIndices.code !== -1 ? String(row[colIndices.code] || '').trim() : '---';
-        let desc = colIndices.desc !== -1 ? String(row[colIndices.desc] || '').trim() : '';
+        let rawCode = colIndices.code !== -1 ? String(row[colIndices.code] || '').trim() : '';
+        let rawDesc = colIndices.desc !== -1 ? String(row[colIndices.desc] || '').trim() : '';
         let rawQty = colIndices.qty !== -1 ? String(row[colIndices.qty] || '') : '';
         let rawPrice = colIndices.price !== -1 ? String(row[colIndices.price] || '') : '';
         let rawTotal = colIndices.total !== -1 ? String(row[colIndices.total] || '') : '';
@@ -861,10 +961,43 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
 
         // Se não encontrou colunas explícitas pelo cabeçalho, tenta posições clássicas (0: desc/código, 1: qty, 2: preço)
         if (headerRowIdx === -1 && row.length >= 3) {
-          desc = String(row[0] || '').trim();
+          rawDesc = String(row[0] || '').trim();
           rawQty = String(row[1] || '');
           rawPrice = String(row[2] || '');
           if (row[3]) rawTotal = String(row[3]);
+        }
+
+        let code = rawCode || "---";
+        let desc = rawDesc;
+
+        // Se o código contém código + descrição mesclados (ex: "6070 - CEFAZOLINA 2G")
+        if (code !== "---") {
+          const leadMatch = code.match(/^(\d{2,12})\s*[-:]?\s*(.+)$/);
+          if (leadMatch) {
+            code = leadMatch[1];
+            if (!desc || desc === rawCode || desc.length < 2) {
+              desc = leadMatch[2].trim();
+            }
+          }
+        }
+
+        // Se a descrição ficou vazia, tentar buscar em outras células de texto da mesma linha
+        if (!desc || desc.length < 2) {
+          row.forEach((cell: any, cIdx: number) => {
+            if (cIdx === colIndices.qty || cIdx === colIndices.price || cIdx === colIndices.total) return;
+            const textStr = String(cell || '').trim();
+            if (textStr.length > 2 && textStr !== code && !textStr.match(/^\d+$/) && !textStr.match(/^(?:R\$)?\s*[\d.,]+$/)) {
+              if (!desc) desc = textStr;
+            }
+          });
+        }
+
+        // Se a descrição começa com o código (ex: code = "6069", desc = "6069 - CEFAZOLINA 1G")
+        if (code !== "---" && desc) {
+          desc = desc.replace(new RegExp('^' + code + '[\\s\\-:]*', 'i'), '').trim();
+        }
+        if (desc) {
+          desc = desc.replace(/^\d{2,12}\s*[-:]\s*/, '').trim();
         }
 
         const qtyLeadingMatch = rawQty.trim().match(/^\s*(\d{1,3}(?:\.\d{3})*|\d+)(?:,\d+)?/);
@@ -877,7 +1010,7 @@ const TriagemView: React.FC<{ orders: PurchaseOrder[], setOrders: any }> = ({ or
         let totalValue = totalClean.includes(',') ? parseFloat(totalClean.replace(/\./g, '').replace(',', '.')) : parseFloat(totalClean);
         if (!totalValue || isNaN(totalValue)) totalValue = quantity * unitPrice;
 
-        if (desc.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
+        if (desc && desc.length > 2 && !isNaN(quantity) && quantity > 0 && !isNaN(unitPrice)) {
           items.push({
             code: code || "---",
             description: desc,

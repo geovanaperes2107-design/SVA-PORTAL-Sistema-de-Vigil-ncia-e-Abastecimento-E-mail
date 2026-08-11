@@ -68,24 +68,30 @@ Deno.serve(async (req) => {
         }
 
         const prompt = `
-      Você é um especialista em logística e compras hospitalares. Analise este relatório da "Plataforma Apoio de Compras" / "Apoio Cotações" (Relatório de Produtos Confirmados) e extraia todos os dados organizando por fornecedor (âncora de repetição).
+      Você é um especialista em logística e compras hospitalares. Analise este relatório da "Plataforma Apoio de Compras" / "Apoio Cotações" (Relatório de Produtos Confirmados) e extraia todos os dados organizando estritamente por CARD DE FORNECEDOR.
       
-      INSTRUÇÕES DE EXTRAÇÃO:
-      1. Para cada fornecedor (bloco com o nome da empresa/fornecedor, ex: "ANTIBIÓTICOS DO BRASIL LTDA", CNPJ), extraia:
+      INSTRUÇÕES CRÍTICAS DE EXTRAÇÃO:
+      1. IGNORE A PRIMEIRA PÁGINA DO DOCUMENTO se houver mais de uma página (páginas de capa, resumos gerais da cotação e cabeçalhos do comprador). A extração dos fornecedores deve ocorrer a partir dos CARDS DE FORNECEDORES (página 2 em diante).
+      2. ESTRUTURA POR CARD DE FORNECEDOR: O documento apresenta 1 Card visual para cada Fornecedor. Para cada Card de Fornecedor, extraia:
          - Identificação da Cotação: Número da Cotação (Quotation Number) e Título/Descrição.
-         - Dados do Fornecedor: Nome Fantasia/Razão Social, CNPJ (ex: 05.439.635/0001-03) e Número da Ordem de Compra (localizado em "Cód. Ordem de Compra:", ex: 28984).
-         - Logística: Prazo de Entrega (Delivery Deadline, ex: 10 dias).
-         - Lista de Produtos Confirmados: Todos os itens da tabela (colunas "informação do produto", "descrição", "quantidade", "valor unitário", "valor total"):
-           * "code": Número sob a coluna "informação do produto" (ex: 6069, 69156).
-           * "description": Texto sob a coluna "descrição" (ex: "CEFAZOLINA PO P/ SOL INJ 1G").
+          - Dados do Fornecedor do Card:
+           * "name": Nome Fantasia ou Razão Social do Fornecedor DO CARD (ex: "ANTIBIÓTICOS DO BRASIL LTDA"). NÃO confunda com o hospital/comprador nem com fornecedores de outros cards. NUNCA extraia dados de cidade, estado, local de entrega, comprador ou município no lugar do nome do fornecedor (ex: se houver "CIDADE: SÃO PAULO - SP", ignore a cidade e procure o nome da empresa fornecedora).
+           * "cnpj": CNPJ do Fornecedor contido no cabeçalho do CARD (formato XX.XXX.XXX/XXXX-XX).
+           * "orderNumber": Número da Ordem de Compra referente a este card (ex: "28984" localizado em "Cód. Ordem de Compra:").
+           * "deliveryDeadline": Prazo de Entrega do card (ex: "10 dias").
+         - Lista de Produtos do Card: Todos os itens da tabela do card ("informação do produto", "descrição", "quantidade", "embalagem", "valor unitário", "valor total"):
+           * "code": CÓDIGO NUMÉRICO do item apenas (ex: "5621", "5416", "38218", "74949"). NUNCA coloque o nome ou descrição do medicamento no campo "code".
+           * "description": Descrição COMPLETA e ÍNTEGRA do produto (ex: "BROMOPRIDA SOL INJ 5MG/ML 2ML HIPOLABOR", "HEPARINA SODICA SOL INJ 5000UI/ML 5ML HIPOLABOR UNIAO"). ATENÇÃO: Se a descrição do produto na tabela estiver dividida em 2 linhas (ex: a linha superior contém "HEPARINA SODICA SOL INJ" e a linha inferior "5416 5000UI/ML 5ML HIPOLABOR UNIAO"), JUNTE AS DUAS LINHAS no campo "description" deste item ("HEPARINA SODICA SOL INJ 5000UI/ML 5ML HIPOLABOR UNIAO"). NUNCA junte o texto de um produto na descrição de outro produto!
            * "quantity": Número puro da quantidade (ex: de "600FR/A1000S", extraia apenas 600; de "200FRS", extraia 200).
-           * "unitPrice": Valor numérico em R$ (ex: 3.40, 5.00).
-           * "totalValue": Valor total em R$ (ex: 2040.00, 1000.00).
-           * "unit": Unidade ou embalagem (ex: "caixa c/ 50", "FRS", "FR").
+           * "unitPrice": Valor unitário numérico em R$ (ex: 3.40, 5.00).
+           * "totalValue": Valor total numérico em R$ (ex: 2040.00, 1000.00).
+           * "unit": Unidade ou embalagem (ex: "FR", "FRS", "CX", "UN", "AMP", "UNIDADE C/ 50").
 
-      2. Regras de Negócio:
+      3. Regras de Negócio:
          - Se o valor total de um item não estiver explícito, calcule (Quantidade * Valor Unitário).
-         - Limpe caracteres e quebras de linha indesejadas nas descrições.
+         - Limpe apenas quebras de linha e caracteres nulos indesejados nas descrições.
+         - Nunca repita o código do item dentro da descrição do produto.
+         - Garanta que cada produto pertença EXATAMENTE à sua linha e seu código.
          - Retorne APENAS o JSON no formato especificado abaixo.
 
       FORMATO DE SAÍDA:
